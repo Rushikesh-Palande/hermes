@@ -48,6 +48,9 @@ from sqlalchemy import select
 from hermes.config import Settings, get_settings
 from hermes.db.engine import async_session, dispose_engine
 from hermes.db.models import SensorOffset
+from hermes.detection.config import StaticConfigProvider, TypeAConfig
+from hermes.detection.engine import DetectionEngine
+from hermes.detection.sink import LoggingEventSink
 from hermes.ingest.clock import ClockRegistry
 from hermes.ingest.live_data import LiveDataHub
 from hermes.ingest.offsets import OffsetCache
@@ -79,6 +82,7 @@ async def _consume(
     clocks: ClockRegistry,
     offsets: OffsetCache,
     live: LiveDataHub,
+    detection: DetectionEngine,
     stop_event: asyncio.Event,
 ) -> None:
     """
@@ -118,6 +122,9 @@ async def _consume(
         # --- Feed live ring buffer ---
         live.push(device_id, ts, sensor_values)
 
+        # --- Feed detection engine (Type A only in Phase 3b/c) ---
+        detection.feed_snapshot(device_id, ts, sensor_values)
+
         log.debug(
             "sample_ingested",
             device_id=device_id,
@@ -146,6 +153,14 @@ class IngestPipeline:
         self.live_data = LiveDataHub(maxlen=settings.live_buffer_max_samples)
         self._offsets = OffsetCache()
         self._clocks = ClockRegistry(drift_threshold_s=settings.mqtt_drift_threshold_s)
+        # Detection: Type A is disabled by default so an out-of-the-box
+        # deployment does not fire spurious events before the operator
+        # has configured thresholds. The DB-backed provider lands in
+        # Phase 3e and will override these defaults per-sensor.
+        self._detection = DetectionEngine(
+            config_provider=StaticConfigProvider(TypeAConfig(enabled=False)),
+            sink=LoggingEventSink(),
+        )
         self._stop_event = asyncio.Event()
         self._queue: asyncio.Queue[tuple[bytes, float]] = asyncio.Queue()
         self._consumer_task: asyncio.Task[None] | None = None
@@ -215,6 +230,7 @@ class IngestPipeline:
                 self._clocks,
                 self._offsets,
                 self.live_data,
+                self._detection,
                 self._stop_event,
             ),
             name="mqtt-consumer",
