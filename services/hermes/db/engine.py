@@ -60,7 +60,7 @@ def _session_factory() -> async_sessionmaker[AsyncSession]:
         bind=_engine(),
         class_=AsyncSession,
         expire_on_commit=False,  # keep objects usable after commit
-        autoflush=False,         # explicit flushes only; predictable perf
+        autoflush=False,  # explicit flushes only; predictable perf
     )
 
 

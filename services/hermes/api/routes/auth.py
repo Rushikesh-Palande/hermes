@@ -103,4 +103,4 @@ async def logout() -> None:
     Client-side logout. Server has no session to invalidate; JWT expiry
     handles it. Exists as a 204 so UIs can POST here and drop the token.
     """
-    return None
+    return

@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from hermes.config import get_settings
 
-
 EXPECTED_TABLES = {
     "devices",
     "packages",
@@ -47,9 +46,9 @@ async def test_migrations_produce_all_expected_tables() -> None:
     settings = get_settings()
     # Use a plain asyncpg URL — same DB, but without the SQLAlchemy
     # dialect prefix so we can exec raw multi-statement SQL.
-    engine = create_async_engine(settings.migrate_database_url.replace(
-        "postgresql://", "postgresql+asyncpg://"
-    ))
+    engine = create_async_engine(
+        settings.migrate_database_url.replace("postgresql://", "postgresql+asyncpg://")
+    )
 
     migrations_dir = Path(__file__).parents[2] / "migrations"
     migration_files = sorted(migrations_dir.glob("00*.sql"))
@@ -65,10 +64,7 @@ async def test_migrations_produce_all_expected_tables() -> None:
 
     async with engine.connect() as conn:
         result = await conn.execute(
-            text(
-                "SELECT table_name FROM information_schema.tables "
-                "WHERE table_schema = 'public'"
-            )
+            text("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
         )
         found = {row[0] for row in result}
 

@@ -65,10 +65,16 @@ class DeviceOut(BaseModel):
 # ─── Routes ────────────────────────────────────────────────────────
 
 
+# All handlers below are scaffolds — they resolve the FastAPI deps (so the
+# OpenAPI schema is correct) but raise 501 until the real implementation
+# lands. The `_user` / `_session` locals silence unused-arg warnings
+# without re-typing the params.
+
+
 @router.get("", response_model=list[DeviceOut])
-async def list_devices(_: CurrentUser, session: DbSession) -> list[DeviceOut]:
+async def list_devices(user: CurrentUser, session: DbSession) -> list[DeviceOut]:
     """Return all devices. Authentication required."""
-    _ = session  # stub
+    del user, session
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail="list_devices not yet implemented (scaffold only)",
@@ -76,12 +82,9 @@ async def list_devices(_: CurrentUser, session: DbSession) -> list[DeviceOut]:
 
 
 @router.post("", response_model=DeviceOut, status_code=status.HTTP_201_CREATED)
-async def create_device(
-    payload: DeviceIn, _: CurrentUser, session: DbSession
-) -> DeviceOut:
+async def create_device(payload: DeviceIn, user: CurrentUser, session: DbSession) -> DeviceOut:
     """Create a new device row. Does NOT start ingestion."""
-    _ = payload  # stub
-    _ = session
+    del payload, user, session
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail="create_device not yet implemented (scaffold only)",
@@ -89,8 +92,8 @@ async def create_device(
 
 
 @router.get("/{device_id}", response_model=DeviceOut)
-async def get_device(device_id: int, _: CurrentUser, session: DbSession) -> DeviceOut:
-    _ = session
+async def get_device(device_id: int, user: CurrentUser, session: DbSession) -> DeviceOut:
+    del user, session
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail=f"get_device({device_id}) not yet implemented",
@@ -99,10 +102,12 @@ async def get_device(device_id: int, _: CurrentUser, session: DbSession) -> Devi
 
 @router.patch("/{device_id}", response_model=DeviceOut)
 async def patch_device(
-    device_id: int, payload: DevicePatch, _: CurrentUser, session: DbSession
+    device_id: int,
+    payload: DevicePatch,
+    user: CurrentUser,
+    session: DbSession,
 ) -> DeviceOut:
-    _ = payload
-    _ = session
+    del payload, user, session
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail=f"patch_device({device_id}) not yet implemented",
@@ -110,8 +115,8 @@ async def patch_device(
 
 
 @router.delete("/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_device(device_id: int, _: CurrentUser, session: DbSession) -> None:
-    _ = session
+async def delete_device(device_id: int, user: CurrentUser, session: DbSession) -> None:
+    del user, session
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail=f"delete_device({device_id}) not yet implemented",
