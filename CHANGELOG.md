@@ -8,6 +8,8 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.1] — 2026-04-24
+
 ### Added
 - Phase 1 foundation scaffolding: Python (`pyproject.toml`, ruff, mypy, pytest)
   and SvelteKit frontend shells.
@@ -20,6 +22,8 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
   no business logic yet.
 - `docker-compose.dev.yml` for local Postgres+TimescaleDB, Mosquitto, and Redis.
 - GitHub Actions CI: ruff, mypy, pytest, pnpm typecheck.
+- Dev helper scripts (`scripts/db-migrate.sh`, `scripts/dev-up.sh`,
+  `scripts/dev-down.sh`) and `packaging/README.md` placeholder.
 
 ### Security
 - Redacted the Gmail app password that had been exposed in
@@ -41,5 +45,6 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
   CODE_OF_CONDUCT, CODEOWNERS, issue and PR templates, Dependabot config,
   `.gitignore`, `.gitattributes`, `.editorconfig`.
 
-[Unreleased]: https://github.com/Rushikesh-Palande/hermes/compare/v0.0.1...HEAD
-[0.0.1]: https://github.com/Rushikesh-Palande/hermes/releases/tag/v0.0.1
+[Unreleased]:     https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.1...HEAD
+[0.1.0-alpha.1]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.0.1...v0.1.0-alpha.1
+[0.0.1]:          https://github.com/Rushikesh-Palande/hermes/releases/tag/v0.0.1
