@@ -18,6 +18,7 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     BigInteger,
@@ -27,17 +28,14 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Identity,
-    Index,
     Integer,
     LargeBinary,
     SmallInteger,
-    String,
     Text,
-    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
@@ -47,18 +45,18 @@ class Base(DeclarativeBase):
 # ─── Enums (match CREATE TYPE in 0002_core_tables.sql) ─────────────
 
 
-class ParameterScope(str, enum.Enum):
+class ParameterScope(enum.StrEnum):
     GLOBAL = "global"
     DEVICE = "device"
     SENSOR = "sensor"
 
 
-class SessionScope(str, enum.Enum):
+class SessionScope(enum.StrEnum):
     GLOBAL = "global"
     LOCAL = "local"
 
 
-class SessionLogEvent(str, enum.Enum):
+class SessionLogEvent(enum.StrEnum):
     START = "start"
     STOP = "stop"
     PAUSE = "pause"
@@ -67,7 +65,7 @@ class SessionLogEvent(str, enum.Enum):
     ERROR = "error"
 
 
-class EventType(str, enum.Enum):
+class EventType(enum.StrEnum):
     A = "A"
     B = "B"
     C = "C"
@@ -75,7 +73,7 @@ class EventType(str, enum.Enum):
     BREAK = "BREAK"
 
 
-class DeviceProtocol(str, enum.Enum):
+class DeviceProtocol(enum.StrEnum):
     MQTT = "mqtt"
     MODBUS_TCP = "modbus_tcp"
 
@@ -99,7 +97,7 @@ class Device(Base):
         default=DeviceProtocol.MQTT,
     )
     topic: Mapped[str | None] = mapped_column(Text)
-    modbus_config: Mapped[dict | None] = mapped_column(JSONB)
+    modbus_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -154,9 +152,7 @@ class Parameter(Base):
 
     __tablename__ = "parameters"
 
-    parameter_id: Mapped[int] = mapped_column(
-        BigInteger, Identity(always=True), primary_key=True
-    )
+    parameter_id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     package_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("packages.package_id", ondelete="CASCADE"),
@@ -165,12 +161,10 @@ class Parameter(Base):
     scope: Mapped[ParameterScope] = mapped_column(
         Enum(ParameterScope, name="parameter_scope"), nullable=False
     )
-    device_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("devices.device_id")
-    )
+    device_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("devices.device_id"))
     sensor_id: Mapped[int | None] = mapped_column(SmallInteger)
     key: Mapped[str] = mapped_column(Text, nullable=False)
-    value: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    value: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
 
 class Session(Base):
@@ -194,9 +188,7 @@ class Session(Base):
     parent_session_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("sessions.session_id")
     )
-    device_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("devices.device_id")
-    )
+    device_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("devices.device_id"))
     package_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("packages.package_id"), nullable=False
     )
@@ -207,9 +199,7 @@ class Session(Base):
     started_by: Mapped[str | None] = mapped_column(Text)
     ended_reason: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
-    record_raw_samples: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
+    record_raw_samples: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class SessionLog(Base):
@@ -217,9 +207,7 @@ class SessionLog(Base):
 
     __tablename__ = "session_logs"
 
-    log_id: Mapped[int] = mapped_column(
-        BigInteger, Identity(always=True), primary_key=True
-    )
+    log_id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     session_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("sessions.session_id", ondelete="CASCADE"),
@@ -232,7 +220,7 @@ class SessionLog(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     actor: Mapped[str | None] = mapped_column(Text)
-    details: Mapped[dict | None] = mapped_column(JSONB)
+    details: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
 
 class Event(Base):
@@ -245,18 +233,19 @@ class Event(Base):
 
     __tablename__ = "events"
 
-    # Composite PK because the Timescale hypertable partitions on triggered_at.
-    event_id: Mapped[int] = mapped_column(BigInteger, Identity(always=True))
+    # Composite PK: `(event_id, triggered_at)`. Timescale hypertables
+    # partition on the time dimension, so it MUST be part of the PK.
+    # We set primary_key=True on both columns so SQLAlchemy emits a
+    # proper PrimaryKeyConstraint (which matches the SQL migration).
+    event_id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     triggered_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True), nullable=False, primary_key=True
     )
 
     session_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("sessions.session_id"), nullable=False
     )
-    device_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("devices.device_id"), nullable=False
-    )
+    device_id: Mapped[int] = mapped_column(Integer, ForeignKey("devices.device_id"), nullable=False)
     sensor_id: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     event_type: Mapped[EventType] = mapped_column(
         Enum(EventType, name="event_type"), nullable=False
@@ -265,15 +254,10 @@ class Event(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     triggered_value: Mapped[float] = mapped_column(nullable=False)
-    metadata_: Mapped[dict] = mapped_column(
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSONB, nullable=False, server_default="{}"
     )
     window_id: Mapped[int | None] = mapped_column(BigInteger)
-
-    __table_args__ = (
-        # Composite PK declared here so `triggered_at` is part of the key.
-        UniqueConstraint("event_id", "triggered_at", name="events_pkey"),
-    )
 
 
 class EventWindow(Base):
@@ -284,21 +268,13 @@ class EventWindow(Base):
 
     __tablename__ = "event_windows"
 
-    window_id: Mapped[int] = mapped_column(
-        BigInteger, Identity(always=True), primary_key=True
-    )
+    window_id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     event_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    start_ts: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    end_ts: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    start_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     sample_rate_hz: Mapped[float] = mapped_column(nullable=False, default=123.0)
     sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    encoding: Mapped[str] = mapped_column(
-        Text, nullable=False, default="zstd+delta-f32"
-    )
+    encoding: Mapped[str] = mapped_column(Text, nullable=False, default="zstd+delta-f32")
     data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
 
 
@@ -347,9 +323,7 @@ class UserOtp(Base):
 
     __tablename__ = "user_otps"
 
-    otp_id: Mapped[int] = mapped_column(
-        BigInteger, Identity(always=True), primary_key=True
-    )
+    otp_id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.user_id", ondelete="CASCADE"),
@@ -359,9 +333,7 @@ class UserOtp(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
@@ -371,9 +343,7 @@ class MqttBroker(Base):
 
     __tablename__ = "mqtt_brokers"
 
-    broker_id: Mapped[int] = mapped_column(
-        BigInteger, Identity(always=True), primary_key=True
-    )
+    broker_id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     host: Mapped[str] = mapped_column(Text, nullable=False)
     port: Mapped[int] = mapped_column(Integer, nullable=False, default=1883)
     username: Mapped[str | None] = mapped_column(Text)
