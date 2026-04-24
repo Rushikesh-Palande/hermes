@@ -1,0 +1,17 @@
+# SvelteKit / Vite / Node — scoped to the ui/ subtree.
+# Root .gitignore also covers most of these; listed here as a safety net
+# so cloning just the ui/ directory still behaves.
+
+node_modules/
+.svelte-kit/
+build/
+.vite/
+.vercel/
+.netlify/
+*.tsbuildinfo
+*.log
+
+# We standardise on pnpm for the UI. A stray package-lock.json or yarn.lock
+# means someone ran the wrong installer; keep them out of history.
+package-lock.json
+yarn.lock

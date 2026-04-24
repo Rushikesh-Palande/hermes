@@ -1,0 +1,76 @@
+# HERMES — development stack.
+# Brings up Postgres + TimescaleDB, Mosquitto, and Redis for local dev.
+# Production uses systemd-managed services, not Compose.
+
+name: hermes-dev
+
+services:
+  postgres:
+    image: timescale/timescaledb:2.17.2-pg16
+    container_name: hermes-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     hermes_migrate
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB:       hermes
+      TS_TUNE_MEMORY:    1GB
+      TS_TUNE_NUM_CPUS:  2
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations:/migrations:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hermes_migrate -d hermes"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0.20
+    container_name: hermes-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mqttdata:/mosquitto/data
+      - mqttlog:/mosquitto/log
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_pub -h localhost -t healthcheck -m ok -q 0 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: hermes-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --save 60 1
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mqtt-explorer:
+    # Optional: web UI to inspect MQTT traffic during dev.
+    image: smeagolworms4/mqtt-explorer:latest
+    container_name: hermes-mqtt-explorer
+    profiles: ["tools"]
+    ports:
+      - "4000:4000"
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+
+volumes:
+  pgdata:    {}
+  mqttdata:  {}
+  mqttlog:   {}
+  redisdata: {}

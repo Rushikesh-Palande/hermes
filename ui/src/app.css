@@ -1,0 +1,27 @@
+/*
+ * app.css — global styles.
+ *
+ * Only three things live here:
+ *   1. Tailwind base/components/utilities directives.
+ *   2. Font rendering defaults so the dashboard looks sharp on the
+ *      Pi's default X-server fonts.
+ *   3. CSS vars shared across components (focus ring, elevation).
+ *
+ * Everything else — including colours, spacing, and component styles —
+ * lives in Tailwind utility classes on individual components.
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    :root {
+        --hermes-focus-ring: 0 0 0 2px rgb(59 130 246 / 0.6);
+    }
+
+    /* Ensure uPlot chart canvases inherit sane defaults on Safari/WebKit. */
+    canvas.u-plot {
+        display: block;
+    }
+}

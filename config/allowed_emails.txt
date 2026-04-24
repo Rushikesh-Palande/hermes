@@ -1,0 +1,6 @@
+# HERMES — OTP login allowlist.
+# One email per line. Lines beginning with '#' are comments.
+# Case-insensitive match. Whitespace is trimmed.
+
+rushikesh@embedsquare.com
+cbidap@embedsquare.com

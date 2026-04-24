@@ -1,0 +1,151 @@
+# .github/workflows/ci.yml
+#
+# HERMES continuous integration.
+#
+# Runs on every push to main/develop and every PR targeting them. Three
+# independent jobs:
+#
+#   python — ruff (lint + format), mypy (strict), pytest (unit + integration
+#            against a throwaway Postgres service container).
+#   ui     — svelte-check, tsc --noEmit, prettier/eslint.
+#   build  — verifies the Python project builds a wheel and the UI
+#            builds a production bundle. Artefacts aren't published from
+#            here; release tagging is a separate workflow (added in Phase 9).
+#
+# Fail-fast: jobs run in parallel; a red job doesn't block the others.
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, develop]
+
+# Cancel superseded in-flight runs on the same branch to save minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python lint + typecheck + test
+    runs-on: ubuntu-24.04
+
+    # Ephemeral Postgres + TimescaleDB for the integration tests.
+    services:
+      postgres:
+        image: timescale/timescaledb:2.17.2-pg16
+        env:
+          POSTGRES_USER: hermes_migrate
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: hermes_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd="pg_isready -U hermes_migrate -d hermes_test"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://hermes_migrate:test@localhost:5432/hermes_test
+      MIGRATE_DATABASE_URL: postgresql://hermes_migrate:test@localhost:5432/hermes_test
+      HERMES_JWT_SECRET: test-secret-test-secret-test-secret-test-secret
+      HERMES_LOG_FORMAT: console
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install Python dependencies
+        run: uv sync --extra dev
+
+      - name: ruff (lint)
+        run: uv run ruff check services tests
+
+      - name: ruff (format check)
+        run: uv run ruff format --check services tests
+
+      - name: mypy
+        run: uv run mypy services/hermes
+
+      - name: pytest (unit)
+        run: uv run pytest -m 'not db and not mqtt' --cov=services/hermes --cov-report=xml
+
+      - name: pytest (integration)
+        run: uv run pytest -m db
+
+  ui:
+    name: UI typecheck + lint
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        working-directory: ./ui
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: svelte-check
+        run: pnpm check
+
+      - name: typecheck
+        run: pnpm typecheck
+
+  build:
+    name: Build artefacts (smoke)
+    runs-on: ubuntu-24.04
+    needs: [python, ui]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Python wheel builds
+        run: |
+          uv python install 3.11
+          uv build
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: UI production build
+        working-directory: ./ui
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
