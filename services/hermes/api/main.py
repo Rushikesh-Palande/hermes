@@ -25,7 +25,6 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.responses import ORJSONResponse
 
 from hermes import __version__
 from hermes.api.routes import auth, devices, health
@@ -66,15 +65,14 @@ def create_app() -> FastAPI:
         title="HERMES API",
         version=__version__,
         description=(
-            "Sensor telemetry + event detection API for the HERMES "
-            "industrial monitoring platform."
+            "Sensor telemetry + event detection API for the HERMES industrial monitoring platform."
         ),
-        default_response_class=ORJSONResponse,
         lifespan=_lifespan,
     )
 
-    # Public (no auth).
-    app.include_router(health.router, prefix="/api", tags=["health"])
+    # Public (no auth). Mounted at /api/health so that liveness lives at
+    # /api/health and readiness at /api/health/ready.
+    app.include_router(health.router, prefix="/api/health", tags=["health"])
 
     # Authentication — issues OTPs, verifies, returns JWT.
     app.include_router(auth.router, prefix="/api/auth", tags=["auth"])

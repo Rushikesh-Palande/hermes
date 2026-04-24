@@ -39,7 +39,8 @@ pip-log.txt
 venv/
 env/
 .python-version
-uv.lock
+# Note: `uv.lock` is deliberately committed — it pins transitive deps for CI
+# and production installs. The equivalent for the UI is `ui/pnpm-lock.yaml`.
 
 # ─── JavaScript / Node ─────────────────────────────────────────────
 node_modules/

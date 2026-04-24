@@ -77,8 +77,10 @@ async def run() -> None:
         log.debug("mqtt_message", topic=msg.topic, size=len(msg.payload))
 
     # CallbackAPIVersion.VERSION2 matches the v2-style signatures above.
+    # paho's 2.x type stubs don't re-export CallbackAPIVersion through the
+    # `client` module; the attribute exists at runtime. Silence mypy here.
     client = mqtt.Client(
-        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,  # type: ignore[attr-defined]
         client_id="hermes-ingest",
         clean_session=True,
     )

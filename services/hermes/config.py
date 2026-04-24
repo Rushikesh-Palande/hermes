@@ -47,8 +47,7 @@ class Settings(BaseSettings):
     )
     migrate_database_url: str = Field(
         ...,
-        description="psycopg URL used by the migration runner; separate role "
-                    "with DDL privileges.",
+        description="psycopg URL used by the migration runner; separate role with DDL privileges.",
     )
 
     # ─── API server ────────────────────────────────────────────────
