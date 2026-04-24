@@ -1,0 +1,81 @@
+name: "Bug report"
+description: "Something is not working as expected."
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report.
+        **Do NOT report security vulnerabilities here** — see SECURITY.md.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: "Summary"
+      description: "One or two sentences. What happened?"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: "HERMES version / commit"
+      description: "Output of `git rev-parse --short HEAD` or the tag you're running."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: "Component"
+      options:
+        - "api (FastAPI service)"
+        - "ingest (MQTT consumer)"
+        - "detect (event algorithms)"
+        - "ui (SvelteKit dashboard)"
+        - "db (schema / migrations)"
+        - "ops (packaging, systemd, deploy)"
+        - "docs"
+        - "other"
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: "Steps to reproduce"
+      description: "Numbered list. Exact commands, exact inputs."
+      placeholder: |
+        1. Start the stack: `docker compose up -d`
+        2. Curl `/api/event/list?device_id=1`
+        3. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: "Expected behaviour"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: "Actual behaviour"
+      description: "Include error messages, stack traces, screenshots."
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: "Environment"
+      description: "OS, Python/Node version, Postgres version, Raspberry Pi model if relevant."
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: "Relevant logs"
+      description: "Fenced code blocks preferred. Redact credentials."
+      render: shell

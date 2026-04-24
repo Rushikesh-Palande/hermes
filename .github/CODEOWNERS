@@ -1,0 +1,31 @@
+# HERMES code ownership
+#
+# The LAST matching pattern wins; patterns are in include-order of priority.
+# Every PR requires at least one review from a listed owner; main-branch PRs
+# require an additional reviewer from @Rushikesh-Palande/hermes-maintainers.
+#
+# Syntax: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-security/customizing-your-repository/about-code-owners
+
+# Default: any change needs a maintainer review.
+*                               @Rushikesh-Palande
+
+# Docs & contracts — require an extra set of eyes since they drive behaviour.
+/docs/contracts/                @Rushikesh-Palande
+/docs/design/                   @Rushikesh-Palande
+
+# Database migrations — never merge without a DBA-level review.
+/migrations/                    @Rushikesh-Palande
+
+# Detection algorithms — golden-traffic parity is load-bearing.
+/services/hermes/detect/        @Rushikesh-Palande
+/services/hermes/events/        @Rushikesh-Palande
+
+# Security-sensitive code.
+/services/hermes/auth/          @Rushikesh-Palande
+/SECURITY.md                    @Rushikesh-Palande
+
+# CI & packaging — break these and every build breaks.
+/.github/                       @Rushikesh-Palande
+/packaging/                     @Rushikesh-Palande
+/docker-compose.dev.yml         @Rushikesh-Palande
+/pyproject.toml                 @Rushikesh-Palande

@@ -1,0 +1,53 @@
+name: "Feature request"
+description: "Suggest a new capability or improvement."
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For open-ended design questions, please use **Discussions** instead of an issue.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: "What problem does this solve?"
+      description: "Describe the user pain point, NOT a proposed solution."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: "Proposed solution"
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: "Alternatives considered"
+      description: "What else did you think about? Why was the proposal the best?"
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: "Component"
+      options:
+        - "api"
+        - "ingest"
+        - "detect"
+        - "ui"
+        - "db"
+        - "ops"
+        - "docs"
+        - "other"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: parity
+    attributes:
+      label: "Behavioural parity"
+      options:
+        - label: "This feature does NOT change legacy behaviour."
+        - label: "This feature INTENTIONALLY diverges from legacy; a BUG_DECISION_LOG entry is proposed."

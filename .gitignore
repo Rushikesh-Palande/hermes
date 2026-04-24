@@ -1,0 +1,114 @@
+# ─── Secrets & environment ─────────────────────────────────────────
+# NEVER commit these. If you do, rotate the credential immediately.
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+*.crt
+*.pfx
+
+# ─── Python ────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+wheels/
+*.egg-info/
+.eggs/
+*.egg
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.hypothesis/
+.pycache/
+pip-log.txt
+
+# uv / pip / poetry
+.venv/
+venv/
+env/
+.python-version
+uv.lock
+
+# ─── JavaScript / Node ─────────────────────────────────────────────
+node_modules/
+.pnpm-store/
+.npm
+.yarn-cache/
+.yarn/*
+!.yarn/releases
+!.yarn/patches
+*.tsbuildinfo
+
+# SvelteKit
+ui/.svelte-kit/
+ui/build/
+ui/.vercel/
+ui/.netlify/
+ui/package/
+
+# Vite
+.vite/
+vite.config.*.timestamp-*
+
+# ─── Databases & data ──────────────────────────────────────────────
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/
+pgdata/
+mqttdata/
+
+# Golden traffic captures (use Git LFS if committing)
+tests/golden/*.tar.zst
+tests/golden/*.ndjson
+tests/golden/baseline_*/
+
+# ─── Logs ──────────────────────────────────────────────────────────
+*.log
+logs/
+ping_log_*.txt
+
+# ─── IDE & editors ─────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ─── OS ────────────────────────────────────────────────────────────
+.Trash-*
+ehthumbs.db
+Desktop.ini
+
+# ─── Build artefacts ───────────────────────────────────────────────
+*.deb
+*.rpm
+*.tar.gz
+*.tar.zst
+*.zip
+packaging/build/
+packaging/dist/
+
+# ─── Local scratch ─────────────────────────────────────────────────
+scratch/
+tmp/
+*.bak
+*.orig
+CODEBASE_AUDIT.md
