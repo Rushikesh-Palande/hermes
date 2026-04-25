@@ -8,6 +8,29 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.8] — 2026-04-25
+
+### Added
+
+- **Sensor offsets editor (Phase 5c)**. Four new endpoints under
+  `/api/devices/{device_id}/offsets`:
+  - `GET ` — list all 12 sensors (missing rows default to `0.0`)
+  - `PUT ` — bulk replace; sensors omitted from the body are reset
+  - `PUT /{sensor_id}` — upsert a single sensor
+  - `DELETE /{sensor_id}` — remove the override (effective value 0.0)
+  Every mutation commits, then refreshes the live `OffsetCache` so
+  `corrected = raw − offset` in the ingest hot path picks up the new
+  value within one sample tick — no restart needed.
+- New "Sensor offsets" panel under the live chart on the device
+  detail page (`/devices/[device_id]`). One numeric input per sensor
+  with a reset-to-zero button; "Save offsets" calls the bulk PUT with
+  the non-zero entries (zero values clear the row).
+
+### Changed
+
+- Renamed `IngestPipeline._offsets` to `.offset_cache` so the API
+  layer can reach the live cache off `app.state.ingest_pipeline`.
+
 ## [0.1.0-alpha.7] — 2026-04-25
 
 ### Fixed
@@ -232,7 +255,8 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
   CODE_OF_CONDUCT, CODEOWNERS, issue and PR templates, Dependabot config,
   `.gitignore`, `.gitattributes`, `.editorconfig`.
 
-[Unreleased]:     https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.7...HEAD
+[Unreleased]:     https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.8...HEAD
+[0.1.0-alpha.8]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.7...v0.1.0-alpha.8
 [0.1.0-alpha.7]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.6...v0.1.0-alpha.7
 [0.1.0-alpha.6]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.5...v0.1.0-alpha.6
 [0.1.0-alpha.5]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.4...v0.1.0-alpha.5
