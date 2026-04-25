@@ -7,15 +7,14 @@
 --
 -- Retention summary (see §6 of DATABASE_REDESIGN.md):
 --   * events             — kept forever; compressed after 30 days.
---   * event_windows      — dropped after 1 year (raw ±9s BLOB is bulky;
---                          events still carry summary metadata).
+--   * event_windows      — application-managed cleanup (see TODO below).
 --   * session_samples    — compressed after 1 hour; retention is tied
 --                          to the session's lifecycle, handled in
 --                          application code (not a retention policy).
 --
 -- To change retention at runtime, use:
---   SELECT remove_retention_policy('event_windows');
---   SELECT add_retention_policy('event_windows', INTERVAL '6 months');
+--   SELECT remove_retention_policy('events');
+--   SELECT add_retention_policy('events', INTERVAL '6 months');
 
 BEGIN;
 
@@ -27,13 +26,13 @@ SELECT add_compression_policy(
     if_not_exists => TRUE
 );
 
--- Drop event_windows older than 1 year. The parent events row survives
--- forever; only the ±9s waveform BLOB is released.
-SELECT add_retention_policy(
-    'event_windows',
-    INTERVAL '1 year',
-    if_not_exists => TRUE
-);
+-- TODO(phase-5+): make event_windows a hypertable and re-add a retention
+-- policy here. Today the table is a plain BIGINT-PK table — Timescale's
+-- add_retention_policy() requires a hypertable target (and the partition
+-- column must be part of every unique constraint). Promoting it to a
+-- hypertable on `start_ts` therefore needs a composite-PK schema change
+-- in 0002 + a follow-up ORM update. Until that lands, application code
+-- (a periodic job) handles cleanup of old window BLOBs.
 
 -- Compress session_samples chunks as soon as they close (1 h boundary).
 -- At 30 k rows/second, a 1 h chunk is ~100 M rows before compression —
