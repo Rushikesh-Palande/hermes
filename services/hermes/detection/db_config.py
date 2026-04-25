@@ -29,11 +29,14 @@ so a fresh deployment is silent until the operator turns one on.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import dataclasses
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import asyncpg  # type: ignore[import-untyped]
 from sqlalchemy import select
 
 from hermes.db.engine import async_session
@@ -45,6 +48,17 @@ from hermes.detection.config import (
     TypeDConfig,
 )
 from hermes.logging import get_logger
+
+if TYPE_CHECKING:
+    from hermes.detection.engine import DetectionEngine
+
+# Postgres channel used for cross-process config invalidation. The API
+# process emits NOTIFY <channel>, '<package_id>' after committing a
+# parameter change; every detection shard (Layer 3 multi-process) runs
+# a LISTEN coroutine that reloads its provider on receipt. Single-
+# process deployments work the same way — emitting NOTIFY without a
+# listener is harmless.
+NOTIFY_CHANNEL: str = "hermes_config_changed"
 
 _log = get_logger(__name__, component="detection")
 
@@ -100,6 +114,12 @@ class DbConfigProvider:
         self._devices: dict[int, _ConfigCache] = {}
         # (device_id, sensor_id) → _ConfigCache.
         self._sensors: dict[tuple[int, int], _ConfigCache] = {}
+        # LISTEN/NOTIFY plumbing (Layer 3). Stays None until
+        # ``start_listener()`` is called. Optional everywhere because
+        # single-process deployments don't need it.
+        self._listen_conn: asyncpg.Connection | None = None
+        self._listen_task: asyncio.Task[None] | None = None
+        self._listen_engine: DetectionEngine | None = None
 
     @property
     def package_id(self) -> uuid.UUID:
@@ -148,6 +168,81 @@ class DbConfigProvider:
             device_overrides=len(self._devices),
             sensor_overrides=len(self._sensors),
         )
+
+    # ─── LISTEN/NOTIFY (Layer 3 multi-process config sync) ─────────
+
+    async def start_listener(
+        self,
+        *,
+        dsn: str,
+        engine: DetectionEngine | None = None,
+    ) -> None:
+        """
+        Open a dedicated asyncpg connection that LISTENs on
+        ``hermes_config_changed`` and reloads + (optionally) resets the
+        detection engine on every notification.
+
+        ``dsn`` must be a libpq-style DSN (the Settings'
+        ``migrate_database_url`` works; the SQLAlchemy +asyncpg URL
+        does not — strip the ``+asyncpg`` driver prefix before passing
+        it in).
+
+        Notifications carry the package_id as payload. We reload only
+        when the payload matches our package — multi-package
+        deployments aren't a thing today, but this guards against a
+        future where they are.
+
+        Idempotent: calling twice is a no-op. ``stop_listener`` is the
+        symmetric teardown and is safe to call without a prior start.
+        """
+        if self._listen_task is not None:
+            return
+        self._listen_engine = engine
+        self._listen_conn = await asyncpg.connect(dsn)
+        await self._listen_conn.add_listener(NOTIFY_CHANNEL, self._on_notify)
+        # asyncpg dispatches notifications synchronously from its own
+        # reader task; we don't need a long-running coroutine here. The
+        # connection itself is the resource we hold open.
+        _log.info("config_listener_started", channel=NOTIFY_CHANNEL)
+
+    async def stop_listener(self) -> None:
+        """Close the LISTEN connection. Safe to call repeatedly."""
+        if self._listen_conn is not None:
+            with contextlib.suppress(Exception):
+                # Best-effort: connection may already be torn down.
+                await self._listen_conn.remove_listener(NOTIFY_CHANNEL, self._on_notify)
+            await self._listen_conn.close()
+            self._listen_conn = None
+        if self._listen_task is not None:
+            self._listen_task.cancel()
+            self._listen_task = None
+        self._listen_engine = None
+
+    def _on_notify(
+        self,
+        _conn: asyncpg.Connection,
+        _pid: int,
+        _channel: str,
+        payload: str,
+    ) -> None:
+        """
+        asyncpg dispatch callback. Spawn the reload as a background task
+        because asyncpg expects this to be a sync function — we can't
+        ``await`` here, but ``reload()`` is async.
+        """
+        if payload != str(self._package_id):
+            return
+        asyncio.create_task(self._reload_and_reset(), name="config-reload")
+
+    async def _reload_and_reset(self) -> None:
+        try:
+            await self.reload()
+            engine = self._listen_engine
+            if engine is not None:
+                for device_id in list(engine.device_ids()):
+                    engine.reset_device(device_id)
+        except Exception:  # noqa: BLE001 — best-effort, log + continue
+            _log.exception("config_reload_on_notify_failed")
 
     # ─── DetectorConfigProvider protocol ───────────────────────────
 

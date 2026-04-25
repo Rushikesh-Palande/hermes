@@ -8,6 +8,90 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.15] — 2026-04-25
+
+### Architecture — Layer 3 (multi-process horizontal scaling)
+
+Adds opt-in multi-process operation so HERMES can use all 4 cores on a
+Pi 4 instead of one. **Default deployments stay single-process and are
+behaviourally identical to alpha.14** — multi-shard is opt-in via env
+var. The bench shows alpha.14 single-process sustains ~16 700 msg/s on
+a laptop and ~5 500 msg/s on a Pi 4 vs. the 2 000 msg/s production
+target, so this isn't required for throughput; it's required for
+*safety* when bursts, GC pauses, or device-count growth threaten to
+push a single process below steady-state.
+
+### Added
+
+- **Three operating modes** selected by `HERMES_INGEST_MODE`:
+  - `"all"` (default) — single process subscribes, runs detection on
+    every device, fills live ring buffer. Identical to alpha.14
+    behaviour byte-for-byte.
+  - `"shard"` — one of N detection processes. Subscribes to
+    `stm32/adc` and discards messages where
+    `device_id % shard_count != shard_index`. Owns detection + DB sink
+    + outbound MQTT for its slice; does NOT fill the live ring buffer.
+    Requires `shard_count > 1`.
+  - `"live_only"` — subscribes to `stm32/adc`, fills the live ring
+    buffer for SSE, runs NO detection. Used by the API process when
+    shards are running so SSE keeps working for ALL devices.
+- **Cross-shard config sync via Postgres `LISTEN`/`NOTIFY`**. The API
+  emits `pg_notify('hermes_config_changed', package_id)` after every
+  threshold update; each shard's `DbConfigProvider` opens a dedicated
+  asyncpg connection and `LISTEN`s on the channel, reloading + resetting
+  cached detectors on receipt. Single-process deployments use the same
+  code path; the `NOTIFY` is harmless when no listener is active.
+- **systemd units** in `packaging/systemd/`:
+  - `hermes-ingest.service` — single-process default (mode=all)
+  - `hermes-ingest@.service` — shard template (mode=shard, shard_index
+    from `%i`); `Conflicts=` the single-process unit
+  - `hermes-api.service` — switches between mode=all and mode=live_only
+    via `/etc/hermes/api.env`
+  - `hermes.target` — aggregate target so ops can `start`/`stop` all
+    HERMES services together
+- **`Settings.hermes_ingest_mode`**, `hermes_shard_count`,
+  `hermes_shard_index` with a `model_validator` that rejects bad shard
+  math (count < 1, index out of range, mode=shard with count = 1) so
+  misconfigured deployments fail fast at process start.
+- **20 new unit tests**:
+  - `tests/unit/test_shard_config.py` (7) — Settings validator coverage
+  - `tests/unit/test_consume_shard.py` (5) — round-trips synthetic MQTT
+    through `_consume` with various (count, index) and verifies device-
+    set membership; asserts the union of all shards equals the full
+    device set with no overlap; live_only mode runs without detection.
+- **`docs/design/MULTI_SHARD.md`** — full deployment guide with
+  topology diagrams, deployment steps, rollback procedure, memory
+  budget, failure modes, and topic-sharding rationale.
+
+### Changed
+
+- **`IngestPipeline.__init__`** now constructs DB sink + outbound MQTT
+  + TTL gate + detection engine only when `mode != "live_only"`.
+  `pipeline.detection_engine`, `pipeline.ttl_gate`, and
+  `pipeline.mqtt_event_sink` are typed as `Optional` to reflect this.
+- **`_consume()`** accepts `shard_count` / `shard_index` parameters
+  (default 1/0 = single-process). When `shard_count > 1`, it filters
+  by `device_id % shard_count == shard_index` immediately after parse,
+  before any metric counter ticks. Detection feed becomes a no-op when
+  the engine is None (live_only mode).
+- **`/api/config/...` handlers** emit `NOTIFY hermes_config_changed`
+  via `_notify_config_changed()` after every commit + in-process
+  reload, regardless of deployment mode.
+
+### Behaviour invariants preserved
+
+Verified by 146 unit tests passing and the throughput bench showing
+17 117 msg/s (no regression vs alpha.14):
+- Detection thresholds, debounce, ±9 s windows: unchanged
+- Event priority/dedup/BREAK rules: unchanged
+- MQTT topic shape (`stm32/adc`, `stm32/events/<dev>/<sid>/<TYPE>`): unchanged
+- DB row shape and event_windows encoding: unchanged
+- API contracts (JSON shapes, status codes): unchanged
+
+Multi-shard is transparent to the device, the operator, and the UI.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
 ## [0.1.0-alpha.14] — 2026-04-25
 
 ### Performance — Layer 1 (single-process micro-opts)
