@@ -2,16 +2,26 @@
 	/*
 	 * Config page — Type A / B / C / D detector thresholds.
 	 *
-	 * Each tab is a separate form bound to the corresponding GET / PUT
-	 * endpoint under /api/config. Saving hot-reloads the running engine
-	 * (Phase 4b) — the operator does NOT need to restart anything.
+	 * Each tab edits the GLOBAL config and lists per-device + per-sensor
+	 * overrides for that detector type. Saving anywhere hot-reloads the
+	 * running engine (Phase 4b semantics) — no restart required.
 	 *
-	 * Per-device / per-sensor overrides land in Phase 4c. This page
-	 * edits the GLOBAL config only.
+	 * Override workflow (Phase 5b):
+	 *   * "Save as device override" or "Save as sensor override" PUTs the
+	 *     current form's values to the appropriate scope.
+	 *   * The resolution walk at runtime is SENSOR → DEVICE → GLOBAL.
+	 *   * Removing an override falls back to the next layer up.
 	 */
 	import { onMount } from 'svelte';
 	import { api, ApiError } from '$lib/api';
-	import type { TypeAConfig, TypeBConfig, TypeCConfig, TypeDConfig } from '$lib/types';
+	import type {
+		DetectorTypeName,
+		OverridesOut,
+		TypeAConfig,
+		TypeBConfig,
+		TypeCConfig,
+		TypeDConfig
+	} from '$lib/types';
 
 	type TabId = 'a' | 'b' | 'c' | 'd';
 	let activeTab = $state<TabId>('a');
@@ -21,23 +31,54 @@
 	let typeC = $state<TypeCConfig | null>(null);
 	let typeD = $state<TypeDConfig | null>(null);
 
+	// One OverridesOut per detector type, keyed by tab id.
+	let overrides = $state<Record<TabId, OverridesOut>>({
+		a: { devices: {}, sensors: [] },
+		b: { devices: {}, sensors: [] },
+		c: { devices: {}, sensors: [] },
+		d: { devices: {}, sensors: [] }
+	});
+
 	let loadError = $state<string | null>(null);
 	let saveError = $state<string | null>(null);
 	let saveSuccess = $state(false);
 	let isSaving = $state(false);
 
+	const TAB_TO_TYPE: Record<TabId, DetectorTypeName> = {
+		a: 'type_a',
+		b: 'type_b',
+		c: 'type_c',
+		d: 'type_d'
+	};
+
+	const currentOverrides = $derived(overrides[activeTab]);
+
 	async function loadAll() {
 		loadError = null;
 		try {
-			[typeA, typeB, typeC, typeD] = await Promise.all([
+			const [a, b, c, d, oa, ob, oc, od] = await Promise.all([
 				api.get<TypeAConfig>('/api/config/type_a'),
 				api.get<TypeBConfig>('/api/config/type_b'),
 				api.get<TypeCConfig>('/api/config/type_c'),
-				api.get<TypeDConfig>('/api/config/type_d')
+				api.get<TypeDConfig>('/api/config/type_d'),
+				api.get<OverridesOut>('/api/config/type_a/overrides'),
+				api.get<OverridesOut>('/api/config/type_b/overrides'),
+				api.get<OverridesOut>('/api/config/type_c/overrides'),
+				api.get<OverridesOut>('/api/config/type_d/overrides')
 			]);
+			typeA = a;
+			typeB = b;
+			typeC = c;
+			typeD = d;
+			overrides = { a: oa, b: ob, c: oc, d: od };
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'unknown';
 		}
+	}
+
+	function flashSaved() {
+		saveSuccess = true;
+		setTimeout(() => (saveSuccess = false), 2000);
 	}
 
 	async function save<T>(path: string, payload: T) {
@@ -46,8 +87,7 @@
 		saveSuccess = false;
 		try {
 			await api.put(path, payload);
-			saveSuccess = true;
-			setTimeout(() => (saveSuccess = false), 2000);
+			flashSaved();
 		} catch (e) {
 			saveError = e instanceof ApiError ? e.detail : 'save failed';
 		} finally {
@@ -77,6 +117,133 @@
 		event.preventDefault();
 		if (!typeD) return;
 		await save('/api/config/type_d', typeD);
+	}
+
+	function currentFormPayload(): unknown {
+		switch (activeTab) {
+			case 'a':
+				return typeA;
+			case 'b':
+				return typeB;
+			case 'c':
+				return typeC;
+			case 'd':
+				return typeD;
+		}
+	}
+
+	async function refreshOverrides(tab: TabId) {
+		const type = TAB_TO_TYPE[tab];
+		try {
+			overrides[tab] = await api.get<OverridesOut>(`/api/config/${type}/overrides`);
+		} catch (e) {
+			saveError = e instanceof ApiError ? e.detail : 'reload failed';
+		}
+	}
+
+	async function saveAsDeviceOverride() {
+		const payload = currentFormPayload();
+		if (!payload) return;
+		const raw = window.prompt('Device ID (1–999) for this override:');
+		if (raw === null) return;
+		const deviceId = Number(raw);
+		if (!Number.isInteger(deviceId) || deviceId < 1 || deviceId > 999) {
+			saveError = 'device_id must be an integer between 1 and 999';
+			return;
+		}
+		const type = TAB_TO_TYPE[activeTab];
+		isSaving = true;
+		saveError = null;
+		try {
+			await api.put(`/api/config/${type}/overrides/device/${deviceId}`, payload);
+			flashSaved();
+			await refreshOverrides(activeTab);
+		} catch (e) {
+			saveError = e instanceof ApiError ? e.detail : 'save failed';
+		} finally {
+			isSaving = false;
+		}
+	}
+
+	async function saveAsSensorOverride() {
+		const payload = currentFormPayload();
+		if (!payload) return;
+		const rawDevice = window.prompt('Device ID (1–999) for this override:');
+		if (rawDevice === null) return;
+		const rawSensor = window.prompt('Sensor ID (1–12) for this override:');
+		if (rawSensor === null) return;
+		const deviceId = Number(rawDevice);
+		const sensorId = Number(rawSensor);
+		if (
+			!Number.isInteger(deviceId) ||
+			deviceId < 1 ||
+			deviceId > 999 ||
+			!Number.isInteger(sensorId) ||
+			sensorId < 1 ||
+			sensorId > 12
+		) {
+			saveError = 'device_id 1–999 and sensor_id 1–12 required';
+			return;
+		}
+		const type = TAB_TO_TYPE[activeTab];
+		isSaving = true;
+		saveError = null;
+		try {
+			await api.put(
+				`/api/config/${type}/overrides/sensor/${deviceId}/${sensorId}`,
+				payload
+			);
+			flashSaved();
+			await refreshOverrides(activeTab);
+		} catch (e) {
+			saveError = e instanceof ApiError ? e.detail : 'save failed';
+		} finally {
+			isSaving = false;
+		}
+	}
+
+	async function deleteDeviceOverride(deviceId: number) {
+		const type = TAB_TO_TYPE[activeTab];
+		try {
+			await api.del(`/api/config/${type}/overrides/device/${deviceId}`);
+			await refreshOverrides(activeTab);
+		} catch (e) {
+			saveError = e instanceof ApiError ? e.detail : 'delete failed';
+		}
+	}
+
+	async function deleteSensorOverride(deviceId: number, sensorId: number) {
+		const type = TAB_TO_TYPE[activeTab];
+		try {
+			await api.del(`/api/config/${type}/overrides/sensor/${deviceId}/${sensorId}`);
+			await refreshOverrides(activeTab);
+		} catch (e) {
+			saveError = e instanceof ApiError ? e.detail : 'delete failed';
+		}
+	}
+
+	function summariseConfig(c: Record<string, unknown>): string {
+		// Pull the most identifying fields per detector type.
+		const enabled = c.enabled === true ? 'on' : 'off';
+		const parts: string[] = [enabled];
+		for (const k of [
+			'T1',
+			'T2',
+			'T3',
+			'T4',
+			'T5',
+			'threshold_cv',
+			'threshold_lower',
+			'threshold_upper',
+			'lower_threshold_pct',
+			'upper_threshold_pct',
+			'tolerance_pct'
+		]) {
+			if (k in c && typeof c[k] === 'number') {
+				parts.push(`${k}=${c[k]}`);
+			}
+		}
+		return parts.join(', ');
 	}
 
 	onMount(loadAll);
@@ -257,4 +424,120 @@
 	{:else}
 		<p class="text-sm text-neutral-500">Loading…</p>
 	{/if}
+</section>
+
+<section
+	class="mt-6 rounded-lg border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900"
+>
+	<header class="mb-4 flex items-baseline justify-between">
+		<div>
+			<h2 class="text-sm font-medium uppercase tracking-wide text-neutral-500">
+				Overrides
+			</h2>
+			<p class="mt-1 text-xs text-neutral-500">
+				Per-device and per-sensor overrides take precedence over the global
+				config above (resolution: sensor → device → global).
+			</p>
+		</div>
+		<div class="flex gap-2">
+			<button
+				type="button"
+				onclick={saveAsDeviceOverride}
+				disabled={isSaving}
+				class="rounded-md border border-neutral-300 px-3 py-1.5 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+			>
+				+ Save as device override
+			</button>
+			<button
+				type="button"
+				onclick={saveAsSensorOverride}
+				disabled={isSaving}
+				class="rounded-md border border-neutral-300 px-3 py-1.5 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+			>
+				+ Save as sensor override
+			</button>
+		</div>
+	</header>
+
+	<div class="mb-4">
+		<h3 class="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
+			Per device
+		</h3>
+		{#if Object.keys(currentOverrides.devices).length === 0}
+			<p class="text-xs text-neutral-400">No device overrides.</p>
+		{:else}
+			<table class="w-full text-sm">
+				<thead
+					class="border-b border-neutral-200 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800"
+				>
+					<tr>
+						<th class="px-2 py-1">Device</th>
+						<th class="px-2 py-1">Settings</th>
+						<th class="px-2 py-1 text-right">Action</th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each Object.entries(currentOverrides.devices) as [deviceId, cfg] (deviceId)}
+						<tr class="border-t border-neutral-100 dark:border-neutral-800/50">
+							<td class="px-2 py-1 font-mono">{deviceId}</td>
+							<td class="px-2 py-1 font-mono text-xs text-neutral-600 dark:text-neutral-400">
+								{summariseConfig(cfg)}
+							</td>
+							<td class="px-2 py-1 text-right">
+								<button
+									type="button"
+									onclick={() => deleteDeviceOverride(Number(deviceId))}
+									class="text-xs text-red-600 underline hover:text-red-800 dark:text-red-400"
+								>
+									remove
+								</button>
+							</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		{/if}
+	</div>
+
+	<div>
+		<h3 class="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
+			Per sensor
+		</h3>
+		{#if currentOverrides.sensors.length === 0}
+			<p class="text-xs text-neutral-400">No sensor overrides.</p>
+		{:else}
+			<table class="w-full text-sm">
+				<thead
+					class="border-b border-neutral-200 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800"
+				>
+					<tr>
+						<th class="px-2 py-1">Device</th>
+						<th class="px-2 py-1">Sensor</th>
+						<th class="px-2 py-1">Settings</th>
+						<th class="px-2 py-1 text-right">Action</th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each currentOverrides.sensors as s (`${s.device_id}.${s.sensor_id}`)}
+						<tr class="border-t border-neutral-100 dark:border-neutral-800/50">
+							<td class="px-2 py-1 font-mono">{s.device_id}</td>
+							<td class="px-2 py-1 font-mono">{s.sensor_id}</td>
+							<td class="px-2 py-1 font-mono text-xs text-neutral-600 dark:text-neutral-400">
+								{summariseConfig(s.config)}
+							</td>
+							<td class="px-2 py-1 text-right">
+								<button
+									type="button"
+									onclick={() => deleteSensorOverride(s.device_id, s.sensor_id)}
+									class="text-xs text-red-600 underline hover:text-red-800 dark:text-red-400"
+								>
+									remove
+								</button>
+							</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		{/if}
+	</div>
 </section>

@@ -1,29 +1,39 @@
 """
 /api/config — read and write detector thresholds.
 
-Operator-facing surface for the four event-detection types. Each
-detector has its own GET / PUT pair so the UI can render distinct
-forms; under the hood they all write to the same ``parameters`` table
-under the active package's GLOBAL scope.
+Operator-facing surface for the four event-detection types.
+
+GLOBAL config (applies to every device + sensor unless overridden):
+    GET    /api/config/type_{a,b,c,d}
+    PUT    /api/config/type_{a,b,c,d}
+
+Per-device + per-sensor overrides:
+    GET    /api/config/{type}/overrides
+    PUT    /api/config/{type}/overrides/device/{device_id}
+    DELETE /api/config/{type}/overrides/device/{device_id}
+    PUT    /api/config/{type}/overrides/sensor/{device_id}/{sensor_id}
+    DELETE /api/config/{type}/overrides/sensor/{device_id}/{sensor_id}
+
+Resolution at run-time walks SENSOR → DEVICE → GLOBAL — see
+``DbConfigProvider._cache_for``. An override row replaces the WHOLE
+config for that detector type at that scope (no field-level merging) —
+matches the legacy per-sensor behaviour.
 
 Hot reload semantics:
-    PUT writes the parameter row, then asks the running ingest
-    pipeline to (a) reload its cached configs and (b) reset every
-    cached detector for every device. Detectors are re-created lazily
-    on the next sample, so the new thresholds take effect within one
-    sample tick. No process restart required.
-
-Per-device / per-sensor overrides land in Phase 4c. The endpoints here
-all target GLOBAL scope.
+    Every PUT / DELETE writes the parameter row, then asks the running
+    ingest pipeline to reload its cached configs and reset every cached
+    detector for every device. Detectors are re-created lazily on the
+    next sample, so the new thresholds take effect within one tick.
+    No process restart required.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Annotated
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, HTTPException, Path, Request, status
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,10 +57,6 @@ router = APIRouter()
 
 
 # ─── Pydantic mirrors of the dataclass configs ─────────────────────
-#
-# The dataclasses in detection/config.py are the source of truth; these
-# Pydantic models exist solely for HTTP I/O validation. Conversion goes
-# both ways through ``encode_config`` / ``model_dump``.
 
 
 class TypeAIn(BaseModel):
@@ -84,6 +90,13 @@ class TypeCIn(BaseModel):
     init_fill_ratio: float = Field(default=0.9, gt=0, le=1.0)
     expected_sample_rate_hz: float = Field(default=100.0, gt=0)
 
+    @model_validator(mode="after")
+    def _thresholds_ordered(self) -> TypeCIn:
+        if self.threshold_lower >= self.threshold_upper:
+            # Pydantic surfaces this as a 422 with the message in `detail`.
+            raise ValueError("threshold_lower must be strictly less than threshold_upper")
+        return self
+
 
 class TypeDIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -94,6 +107,43 @@ class TypeDIn(BaseModel):
     debounce_seconds: float = Field(default=0.0, ge=0)
     init_fill_ratio: float = Field(default=0.9, gt=0, le=1.0)
     expected_sample_rate_hz: float = Field(default=100.0, gt=0)
+
+
+# Type-name → Pydantic class + parameter key. Used by the override
+# endpoints which take the type as a path parameter.
+_PYDANTIC_FOR_TYPE: dict[str, type[BaseModel]] = {
+    "type_a": TypeAIn,
+    "type_b": TypeBIn,
+    "type_c": TypeCIn,
+    "type_d": TypeDIn,
+}
+
+_KEY_FOR_TYPE: dict[str, str] = {
+    "type_a": KEY_TYPE_A,
+    "type_b": KEY_TYPE_B,
+    "type_c": KEY_TYPE_C,
+    "type_d": KEY_TYPE_D,
+}
+
+# FastAPI Path-parameter constraint that rejects unknown type names with
+# a clean 422 instead of a 500 from a missing dict key.
+TypeName = Literal["type_a", "type_b", "type_c", "type_d"]
+
+
+# ─── Override response shapes ─────────────────────────────────────
+
+
+class SensorOverrideOut(BaseModel):
+    device_id: int
+    sensor_id: int
+    config: dict[str, Any]
+
+
+class OverridesOut(BaseModel):
+    """Layered view of every override for one detector type."""
+
+    devices: dict[str, dict[str, Any]]  # device_id (as str) → config dict
+    sensors: list[SensorOverrideOut]
 
 
 # ─── Helpers ───────────────────────────────────────────────────────
@@ -115,147 +165,350 @@ async def _upsert_parameter(
     package_id: object,
     key: str,
     value: dict[str, object],
+    *,
+    scope: ParameterScope,
+    device_id: int | None,
+    sensor_id: int | None,
 ) -> None:
     """
-    Replace the GLOBAL parameter row for ``key`` under ``package_id``.
-
-    Implementation: delete-then-insert so we don't have to express the
-    composite uniqueness as a stable upsert constraint right now. A
-    Phase-4c migration will add `(package_id, scope, device_id, sensor_id, key)`
-    as a unique index and convert this to ON CONFLICT.
+    Replace the parameter row identified by
+    (package_id, scope, device_id, sensor_id, key).
     """
-    existing = (
-        await session.execute(
-            select(Parameter).where(
-                Parameter.package_id == package_id,
-                Parameter.scope == ParameterScope.GLOBAL,
-                Parameter.device_id.is_(None),
-                Parameter.sensor_id.is_(None),
-                Parameter.key == key,
-            )
-        )
-    ).scalar_one_or_none()
+    where = [
+        Parameter.package_id == package_id,
+        Parameter.scope == scope,
+        Parameter.key == key,
+    ]
+    if device_id is None:
+        where.append(Parameter.device_id.is_(None))
+    else:
+        where.append(Parameter.device_id == device_id)
+    if sensor_id is None:
+        where.append(Parameter.sensor_id.is_(None))
+    else:
+        where.append(Parameter.sensor_id == sensor_id)
+
+    existing = (await session.execute(select(Parameter).where(*where))).scalar_one_or_none()
     if existing is not None:
         existing.value = value
     else:
         session.add(
             Parameter(
                 package_id=package_id,
-                scope=ParameterScope.GLOBAL,
-                device_id=None,
-                sensor_id=None,
+                scope=scope,
+                device_id=device_id,
+                sensor_id=sensor_id,
                 key=key,
                 value=value,
             )
         )
 
 
-async def _apply_update(
-    request: Request,
+async def _delete_parameter(
     session: AsyncSession,
+    package_id: object,
     key: str,
-    value_dict: dict[str, object],
-) -> DbConfigProvider:
-    """Persist + hot-reload + reset detectors. Returns the live provider."""
+    *,
+    scope: ParameterScope,
+    device_id: int | None,
+    sensor_id: int | None,
+) -> bool:
+    """Delete the matching parameter row. Returns True iff a row was removed."""
+    where = [
+        Parameter.package_id == package_id,
+        Parameter.scope == scope,
+        Parameter.key == key,
+    ]
+    if device_id is None:
+        where.append(Parameter.device_id.is_(None))
+    else:
+        where.append(Parameter.device_id == device_id)
+    if sensor_id is None:
+        where.append(Parameter.sensor_id.is_(None))
+    else:
+        where.append(Parameter.sensor_id == sensor_id)
+    existing = (await session.execute(select(Parameter).where(*where))).scalar_one_or_none()
+    if existing is None:
+        return False
+    await session.delete(existing)
+    return True
+
+
+async def _hot_reload(request: Request) -> DbConfigProvider:
+    """Tell the running pipeline to refresh its config + drop cached detectors."""
     provider = _provider_or_503(request)
-    await _upsert_parameter(session, provider.package_id, key, value_dict)
-    await session.flush()
     await provider.reload()
     pipeline = getattr(request.app.state, "ingest_pipeline", None)
     if pipeline is not None:
         engine = pipeline.detection_engine
-        # Reset every cached device so the new config takes effect.
         for device_id in list(engine.device_ids()):
             engine.reset_device(device_id)
     return provider
 
 
-# ─── Routes ────────────────────────────────────────────────────────
+def _cache_to_dict(cache: object, type_name: TypeName) -> dict[str, Any]:
+    """Pull the matching dataclass off a _ConfigCache and asdict() it."""
+    attr = type_name  # _ConfigCache fields are named type_a / type_b / type_c / type_d
+    return asdict(getattr(cache, attr))
+
+
+# ─── Routes — global config ────────────────────────────────────────
 
 
 @router.get("/type_a", response_model=TypeAIn)
 async def get_type_a(request: Request, user: CurrentUser) -> TypeAIn:
     del user
-    cfg = _provider_or_503(request).type_a_for(0, 0)
-    return TypeAIn(**asdict(cfg))
+    return TypeAIn(**asdict(_provider_or_503(request).type_a_for(0, 0)))
 
 
 @router.put("/type_a", response_model=TypeAIn)
 async def put_type_a(
-    payload: Annotated[TypeAIn, ...],
-    request: Request,
-    user: CurrentUser,
-    session: DbSession,
+    payload: TypeAIn, request: Request, user: CurrentUser, session: DbSession
 ) -> TypeAIn:
     del user
-    await _apply_update(request, session, KEY_TYPE_A, payload.model_dump())
+    provider = _provider_or_503(request)
+    await _upsert_parameter(
+        session,
+        provider.package_id,
+        KEY_TYPE_A,
+        payload.model_dump(),
+        scope=ParameterScope.GLOBAL,
+        device_id=None,
+        sensor_id=None,
+    )
+    await session.flush()
+    await _hot_reload(request)
     return TypeAIn(**asdict(_provider_or_503(request).type_a_for(0, 0)))
 
 
 @router.get("/type_b", response_model=TypeBIn)
 async def get_type_b(request: Request, user: CurrentUser) -> TypeBIn:
     del user
-    cfg = _provider_or_503(request).type_b_for(0, 0)
-    return TypeBIn(**asdict(cfg))
+    return TypeBIn(**asdict(_provider_or_503(request).type_b_for(0, 0)))
 
 
 @router.put("/type_b", response_model=TypeBIn)
 async def put_type_b(
-    payload: Annotated[TypeBIn, ...],
-    request: Request,
-    user: CurrentUser,
-    session: DbSession,
+    payload: TypeBIn, request: Request, user: CurrentUser, session: DbSession
 ) -> TypeBIn:
     del user
-    await _apply_update(request, session, KEY_TYPE_B, payload.model_dump())
+    provider = _provider_or_503(request)
+    await _upsert_parameter(
+        session,
+        provider.package_id,
+        KEY_TYPE_B,
+        payload.model_dump(),
+        scope=ParameterScope.GLOBAL,
+        device_id=None,
+        sensor_id=None,
+    )
+    await session.flush()
+    await _hot_reload(request)
     return TypeBIn(**asdict(_provider_or_503(request).type_b_for(0, 0)))
 
 
 @router.get("/type_c", response_model=TypeCIn)
 async def get_type_c(request: Request, user: CurrentUser) -> TypeCIn:
     del user
-    cfg = _provider_or_503(request).type_c_for(0, 0)
-    return TypeCIn(**asdict(cfg))
+    return TypeCIn(**asdict(_provider_or_503(request).type_c_for(0, 0)))
 
 
 @router.put("/type_c", response_model=TypeCIn)
 async def put_type_c(
-    payload: Annotated[TypeCIn, ...],
-    request: Request,
-    user: CurrentUser,
-    session: DbSession,
+    payload: TypeCIn, request: Request, user: CurrentUser, session: DbSession
 ) -> TypeCIn:
     del user
-    # Validate threshold ordering — thresholds are absolute, not bands;
-    # lower > upper means the detector either always or never triggers.
-    if payload.threshold_lower >= payload.threshold_upper:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="threshold_lower must be strictly less than threshold_upper",
-        )
-    await _apply_update(request, session, KEY_TYPE_C, payload.model_dump())
+    provider = _provider_or_503(request)
+    await _upsert_parameter(
+        session,
+        provider.package_id,
+        KEY_TYPE_C,
+        payload.model_dump(),
+        scope=ParameterScope.GLOBAL,
+        device_id=None,
+        sensor_id=None,
+    )
+    await session.flush()
+    await _hot_reload(request)
     return TypeCIn(**asdict(_provider_or_503(request).type_c_for(0, 0)))
 
 
 @router.get("/type_d", response_model=TypeDIn)
 async def get_type_d(request: Request, user: CurrentUser) -> TypeDIn:
     del user
-    cfg = _provider_or_503(request).type_d_for(0, 0)
-    return TypeDIn(**asdict(cfg))
+    return TypeDIn(**asdict(_provider_or_503(request).type_d_for(0, 0)))
 
 
 @router.put("/type_d", response_model=TypeDIn)
 async def put_type_d(
-    payload: Annotated[TypeDIn, ...],
-    request: Request,
-    user: CurrentUser,
-    session: DbSession,
+    payload: TypeDIn, request: Request, user: CurrentUser, session: DbSession
 ) -> TypeDIn:
     del user
-    await _apply_update(request, session, KEY_TYPE_D, payload.model_dump())
+    provider = _provider_or_503(request)
+    await _upsert_parameter(
+        session,
+        provider.package_id,
+        KEY_TYPE_D,
+        payload.model_dump(),
+        scope=ParameterScope.GLOBAL,
+        device_id=None,
+        sensor_id=None,
+    )
+    await session.flush()
+    await _hot_reload(request)
     return TypeDIn(**asdict(_provider_or_503(request).type_d_for(0, 0)))
 
 
-# Silence unused-import warnings; the dataclass types are referenced via
+# ─── Routes — overrides (per-device + per-sensor) ──────────────────
+
+
+@router.get("/{type_name}/overrides", response_model=OverridesOut)
+async def list_overrides(type_name: TypeName, request: Request, user: CurrentUser) -> OverridesOut:
+    """Return every per-device and per-sensor override for one detector type."""
+    del user
+    provider = _provider_or_503(request)
+    devices = {
+        str(did): _cache_to_dict(cache, type_name)
+        for did, cache in provider.device_overrides.items()
+    }
+    sensors = [
+        SensorOverrideOut(
+            device_id=did,
+            sensor_id=sid,
+            config=_cache_to_dict(cache, type_name),
+        )
+        for (did, sid), cache in provider.sensor_overrides.items()
+    ]
+    sensors.sort(key=lambda s: (s.device_id, s.sensor_id))
+    return OverridesOut(devices=devices, sensors=sensors)
+
+
+@router.put(
+    "/{type_name}/overrides/device/{device_id}",
+    response_model=dict,
+)
+async def put_device_override(
+    type_name: TypeName,
+    device_id: Annotated[int, Path(ge=1, le=999)],
+    payload: dict[str, Any],
+    request: Request,
+    user: CurrentUser,
+    session: DbSession,
+) -> dict[str, Any]:
+    """
+    Upsert the device-scope override for one detector type. The payload
+    must validate against the detector's Pydantic model (Type{A,B,C,D}In).
+    """
+    del user
+    pyd_cls = _PYDANTIC_FOR_TYPE[type_name]
+    validated = pyd_cls.model_validate(payload)
+    provider = _provider_or_503(request)
+    await _upsert_parameter(
+        session,
+        provider.package_id,
+        _KEY_FOR_TYPE[type_name],
+        validated.model_dump(),
+        scope=ParameterScope.DEVICE,
+        device_id=device_id,
+        sensor_id=None,
+    )
+    await session.flush()
+    await _hot_reload(request)
+    return validated.model_dump()
+
+
+@router.delete(
+    "/{type_name}/overrides/device/{device_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_device_override(
+    type_name: TypeName,
+    device_id: Annotated[int, Path(ge=1, le=999)],
+    request: Request,
+    user: CurrentUser,
+    session: DbSession,
+) -> None:
+    del user
+    provider = _provider_or_503(request)
+    removed = await _delete_parameter(
+        session,
+        provider.package_id,
+        _KEY_FOR_TYPE[type_name],
+        scope=ParameterScope.DEVICE,
+        device_id=device_id,
+        sensor_id=None,
+    )
+    if not removed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"no {type_name} device override for device {device_id}",
+        )
+    await session.flush()
+    await _hot_reload(request)
+
+
+@router.put(
+    "/{type_name}/overrides/sensor/{device_id}/{sensor_id}",
+    response_model=dict,
+)
+async def put_sensor_override(
+    type_name: TypeName,
+    device_id: Annotated[int, Path(ge=1, le=999)],
+    sensor_id: Annotated[int, Path(ge=1, le=12)],
+    payload: dict[str, Any],
+    request: Request,
+    user: CurrentUser,
+    session: DbSession,
+) -> dict[str, Any]:
+    del user
+    pyd_cls = _PYDANTIC_FOR_TYPE[type_name]
+    validated = pyd_cls.model_validate(payload)
+    provider = _provider_or_503(request)
+    await _upsert_parameter(
+        session,
+        provider.package_id,
+        _KEY_FOR_TYPE[type_name],
+        validated.model_dump(),
+        scope=ParameterScope.SENSOR,
+        device_id=device_id,
+        sensor_id=sensor_id,
+    )
+    await session.flush()
+    await _hot_reload(request)
+    return validated.model_dump()
+
+
+@router.delete(
+    "/{type_name}/overrides/sensor/{device_id}/{sensor_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_sensor_override(
+    type_name: TypeName,
+    device_id: Annotated[int, Path(ge=1, le=999)],
+    sensor_id: Annotated[int, Path(ge=1, le=12)],
+    request: Request,
+    user: CurrentUser,
+    session: DbSession,
+) -> None:
+    del user
+    provider = _provider_or_503(request)
+    removed = await _delete_parameter(
+        session,
+        provider.package_id,
+        _KEY_FOR_TYPE[type_name],
+        scope=ParameterScope.SENSOR,
+        device_id=device_id,
+        sensor_id=sensor_id,
+    )
+    if not removed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(f"no {type_name} sensor override for device {device_id} sensor {sensor_id}"),
+        )
+    await session.flush()
+    await _hot_reload(request)
+
+
+# Suppress unused-import warnings; the dataclass types are referenced via
 # DbConfigProvider but Python's static analysers can't see the dynamic link.
 _ = (TypeAConfig, TypeBConfig, TypeCConfig, TypeDConfig)

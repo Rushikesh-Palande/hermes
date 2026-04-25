@@ -6,20 +6,23 @@ scoped to the active session's package. Configs are cached in memory at
 startup and after every ``reload()``; the hot path (one lookup per
 sample) never round-trips to Postgres.
 
-Schema layout chosen for Phase 4b — one parameter row per detector type
-at GLOBAL scope:
+Schema layout — one parameter row per detector type per scope:
 
-    key   = "type_a.config" (or "type_b.config", etc.)
-    value = JSONB encoding of the dataclass (e.g. TypeAConfig)
-    scope = GLOBAL
-    device_id, sensor_id = NULL
+    key          = "type_a.config"
+    value        = JSONB encoding of the dataclass (e.g. TypeAConfig)
+    scope        = GLOBAL | DEVICE | SENSOR
+    device_id    = NULL for GLOBAL, set for DEVICE / SENSOR
+    sensor_id    = NULL for GLOBAL / DEVICE, set for SENSOR
 
-Per-device and per-sensor overrides will land in Phase 4c using the
-same key with scope=DEVICE / scope=SENSOR. The lookup walks
-SENSOR → DEVICE → GLOBAL — implemented but currently always falls
-through to GLOBAL because nothing writes the narrower scopes yet.
+Resolution walk for ``type_X_for(device_id, sensor_id)``:
 
-Defaults: when the parameter row is missing, the dataclass's own field
+    1. SENSOR  — exact match on (device_id, sensor_id)
+    2. DEVICE  — match on device_id only
+    3. GLOBAL  — fallback
+
+Caches are keyed by a tuple so the hot path is one dict lookup per layer.
+
+Defaults: when no row matches at any scope, the dataclass's own field
 defaults are used. ``enabled`` defaults to False on every detector type
 so a fresh deployment is silent until the operator turns one on.
 """
@@ -51,6 +54,15 @@ KEY_TYPE_B = "type_b.config"
 KEY_TYPE_C = "type_c.config"
 KEY_TYPE_D = "type_d.config"
 
+# Map detector key → dataclass type. Used by both ``reload()`` (decode)
+# and the API layer (validation when accepting overrides).
+KEY_TO_CLS: dict[str, type] = {
+    KEY_TYPE_A: TypeAConfig,
+    KEY_TYPE_B: TypeBConfig,
+    KEY_TYPE_C: TypeCConfig,
+    KEY_TYPE_D: TypeDConfig,
+}
+
 
 @dataclass(slots=True)
 class _ConfigCache:
@@ -67,7 +79,7 @@ class DbConfigProvider:
     Reads detector configs from ``parameters`` for the given package.
 
     Construct, call ``await reload()`` once at startup, then pass to the
-    DetectionEngine. Mutating endpoints (PUT /api/config/type_a) call
+    DetectionEngine. Mutating endpoints (PUT /api/config/...) call
     ``reload()`` after persisting and then ``engine.reset_device(...)``
     so newly cached detectors pick up the updated config.
 
@@ -84,28 +96,48 @@ class DbConfigProvider:
             type_c=TypeCConfig(),
             type_d=TypeDConfig(),
         )
+        # device_id → _ConfigCache. None = no device override for that key.
+        self._devices: dict[int, _ConfigCache] = {}
+        # (device_id, sensor_id) → _ConfigCache.
+        self._sensors: dict[tuple[int, int], _ConfigCache] = {}
 
     @property
     def package_id(self) -> uuid.UUID:
         return self._package_id
 
     async def reload(self) -> None:
-        """Refetch all parameters for the active package."""
+        """Refetch every parameter for the active package and rebuild caches."""
         async with async_session() as session:
             rows = await session.execute(
-                select(Parameter).where(
-                    Parameter.package_id == self._package_id,
-                    Parameter.scope == ParameterScope.GLOBAL,
-                )
+                select(Parameter).where(Parameter.package_id == self._package_id)
             )
-            by_key = {row.key: row.value for row in rows.scalars().all()}
+            params = rows.scalars().all()
 
-        self._global = _ConfigCache(
-            type_a=_decode_or_default(by_key.get(KEY_TYPE_A), TypeAConfig),
-            type_b=_decode_or_default(by_key.get(KEY_TYPE_B), TypeBConfig),
-            type_c=_decode_or_default(by_key.get(KEY_TYPE_C), TypeCConfig),
-            type_d=_decode_or_default(by_key.get(KEY_TYPE_D), TypeDConfig),
-        )
+        # Three buckets keyed by scope. Each bucket stores
+        # ``{owner_key: {detector_key: raw_value}}`` so we can build one
+        # _ConfigCache per (scope, owner) at the end.
+        global_by_key: dict[str, Any] = {}
+        device_by_key: dict[int, dict[str, Any]] = {}
+        sensor_by_key: dict[tuple[int, int], dict[str, Any]] = {}
+
+        for row in params:
+            if row.key not in KEY_TO_CLS:
+                continue  # unrelated parameter, ignore
+            if row.scope == ParameterScope.GLOBAL:
+                global_by_key[row.key] = row.value
+            elif row.scope == ParameterScope.DEVICE and row.device_id is not None:
+                device_by_key.setdefault(row.device_id, {})[row.key] = row.value
+            elif (
+                row.scope == ParameterScope.SENSOR
+                and row.device_id is not None
+                and row.sensor_id is not None
+            ):
+                sensor_by_key.setdefault((row.device_id, row.sensor_id), {})[row.key] = row.value
+
+        self._global = _build_cache(global_by_key)
+        self._devices = {did: _build_cache(by_key) for did, by_key in device_by_key.items()}
+        self._sensors = {owner: _build_cache(by_key) for owner, by_key in sensor_by_key.items()}
+
         _log.info(
             "config_reloaded",
             package_id=str(self._package_id),
@@ -113,25 +145,54 @@ class DbConfigProvider:
             type_b_enabled=self._global.type_b.enabled,
             type_c_enabled=self._global.type_c.enabled,
             type_d_enabled=self._global.type_d.enabled,
+            device_overrides=len(self._devices),
+            sensor_overrides=len(self._sensors),
         )
 
     # ─── DetectorConfigProvider protocol ───────────────────────────
 
     def type_a_for(self, device_id: int, sensor_id: int) -> TypeAConfig:
-        del device_id, sensor_id  # per-scope overrides land in Phase 4c
-        return self._global.type_a
+        return self._cache_for(device_id, sensor_id).type_a
 
     def type_b_for(self, device_id: int, sensor_id: int) -> TypeBConfig:
-        del device_id, sensor_id
-        return self._global.type_b
+        return self._cache_for(device_id, sensor_id).type_b
 
     def type_c_for(self, device_id: int, sensor_id: int) -> TypeCConfig:
-        del device_id, sensor_id
-        return self._global.type_c
+        return self._cache_for(device_id, sensor_id).type_c
 
     def type_d_for(self, device_id: int, sensor_id: int) -> TypeDConfig:
-        del device_id, sensor_id
-        return self._global.type_d
+        return self._cache_for(device_id, sensor_id).type_d
+
+    # ─── Override introspection (used by /api/config/overrides) ────
+
+    @property
+    def global_cache(self) -> _ConfigCache:
+        return self._global
+
+    @property
+    def device_overrides(self) -> dict[int, _ConfigCache]:
+        return dict(self._devices)
+
+    @property
+    def sensor_overrides(self) -> dict[tuple[int, int], _ConfigCache]:
+        return dict(self._sensors)
+
+    # ─── Internals ─────────────────────────────────────────────────
+
+    def _cache_for(self, device_id: int, sensor_id: int) -> _ConfigCache:
+        """Walk SENSOR → DEVICE → GLOBAL and return the first hit per field.
+
+        We don't merge fields across scopes — an override row replaces the
+        whole config for that detector type. This matches the legacy
+        behaviour: per-sensor rows store full configs, not deltas.
+        """
+        sensor = self._sensors.get((device_id, sensor_id))
+        if sensor is not None:
+            return sensor
+        device = self._devices.get(device_id)
+        if device is not None:
+            return device
+        return self._global
 
 
 # ─── Encoding helpers ────────────────────────────────────────────────
@@ -142,6 +203,16 @@ def encode_config(cfg: object) -> dict[str, Any]:
     if not dataclasses.is_dataclass(cfg) or isinstance(cfg, type):
         raise TypeError(f"expected a dataclass instance, got {type(cfg).__name__}")
     return dataclasses.asdict(cfg)
+
+
+def _build_cache(by_key: dict[str, Any]) -> _ConfigCache:
+    """Build a _ConfigCache from a {detector_key: raw_value} map."""
+    return _ConfigCache(
+        type_a=_decode_or_default(by_key.get(KEY_TYPE_A), TypeAConfig),
+        type_b=_decode_or_default(by_key.get(KEY_TYPE_B), TypeBConfig),
+        type_c=_decode_or_default(by_key.get(KEY_TYPE_C), TypeCConfig),
+        type_d=_decode_or_default(by_key.get(KEY_TYPE_D), TypeDConfig),
+    )
 
 
 def _decode_or_default(raw: Any, cls: Any) -> Any:
@@ -160,7 +231,5 @@ def _decode_or_default(raw: Any, cls: Any) -> Any:
     try:
         return cls(**filtered)
     except TypeError:
-        # Stale row with incompatible shape — fall back to defaults rather
-        # than crashing the ingest pipeline at startup.
         _log.warning("config_decode_failed_using_defaults", cls=cls.__name__)
         return cls()
