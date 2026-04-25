@@ -8,6 +8,40 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.10] — 2026-04-25
+
+### Added
+
+- **OTP + JWT authentication (Phase 3.5)**, replacing the dev-mode
+  bypass as the primary auth path:
+  - New `services/hermes/auth/` package: `jwt.py` (HS256 issue/decode),
+    `otp.py` (argon2id hash + verify of 6-digit codes), `email.py`
+    (aiosmtplib send with a no-op + log fallback when SMTP is
+    unconfigured), `allowlist.py` (per-line `allowed_emails_path`).
+  - `POST /api/auth/otp/request` always returns 204 to prevent
+    allowlist enumeration; allowed addresses get a fresh
+    argon2id-hashed OTP row and an email. Cooldown
+    (`otp_resend_cooldown_seconds`) + per-hour cap
+    (`otp_max_per_hour`) enforced as 429.
+  - `POST /api/auth/otp/verify` argon2-verifies against the most recent
+    unconsumed-and-unexpired OTP, marks it consumed, and issues a
+    JWT. `otp_max_attempts` wrong tries lock the OTP.
+- **Login UI** at `/login`: two-step (email → 6-digit code) form that
+  PUTs the new endpoints and stores the JWT in localStorage.
+- **Auth guard** in the root layout pushes anyone without a token to
+  `/login`; a Sign-out button drops the token and re-routes.
+
+### Changed
+
+- `get_current_user` decodes the bearer token first; the dev-mode
+  bypass only kicks in when no token is presented. So a real frontend
+  runs against real auth even with `HERMES_DEV_MODE=1` on — handy
+  during rollout. Production deployments still set the flag to `0`
+  so the bypass is unreachable.
+- `apiFetch` auto-attaches `Authorization: Bearer <token>` from
+  localStorage and clears the token on any 401, so the next render
+  bounces to `/login` cleanly.
+
 ## [0.1.0-alpha.9] — 2026-04-25
 
 ### Added
@@ -277,8 +311,9 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
   CODE_OF_CONDUCT, CODEOWNERS, issue and PR templates, Dependabot config,
   `.gitignore`, `.gitattributes`, `.editorconfig`.
 
-[Unreleased]:     https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.9...HEAD
-[0.1.0-alpha.9]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.8...v0.1.0-alpha.9
+[Unreleased]:      https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.10...HEAD
+[0.1.0-alpha.10]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.9...v0.1.0-alpha.10
+[0.1.0-alpha.9]:   https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.8...v0.1.0-alpha.9
 [0.1.0-alpha.8]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.7...v0.1.0-alpha.8
 [0.1.0-alpha.7]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.6...v0.1.0-alpha.7
 [0.1.0-alpha.6]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.5...v0.1.0-alpha.6
