@@ -1,38 +1,48 @@
 """
 Authentication routes — OTP over email.
 
-Flow (from docs/reference/templates/other_templates.md, login.html):
+Flow:
+    1. Client POSTs email to /api/auth/otp/request. If the address is
+       in the allowlist file, we generate a 6-digit OTP, argon2id-hash
+       it into ``user_otps``, and email the plaintext code. We ALWAYS
+       return 204 — even when the email is unknown — so an attacker
+       can't probe the allowlist.
 
-    1. Client POSTs email to /api/auth/otp/request.
-       Server: if email is in allowed_emails.txt, generate a 6-digit OTP,
-       hash it with argon2id, store (user_id, code_hash, expires_at),
-       and email the plaintext OTP. Always returns 204 to avoid
-       revealing whether an email is allowlisted (prevents enumeration).
+    2. Client POSTs ``{email, otp}`` to /api/auth/otp/verify. Server
+       argon2-verifies against the most recent unconsumed OTP for the
+       user; on success it marks the row consumed and issues a JWT.
 
-    2. Client POSTs { email, otp } to /api/auth/otp/verify.
-       Server: argon2-verify against the latest unconsumed OTP for that
-       user. On success: mark consumed, issue a short-lived JWT, return
-       it as `{ "access_token": ..., "token_type": "bearer", "expires_in": N }`.
+    3. Client uses the JWT as ``Authorization: Bearer <token>``.
 
-    3. Client uses the JWT as `Authorization: Bearer <token>`.
+    4. POST /api/auth/logout returns 204. JWT expiry handles
+       invalidation; we deliberately do not maintain a revocation list.
 
-    4. POST /api/auth/logout — pure client-side invalidation. Server
-       returns 204. (We deliberately don't run a revocation list; JWT
-       expiry does the job. If we ever need revocation, add a minimal
-       blocklist keyed by jti.)
-
-This module is a SCAFFOLD — the actual OTP generation, hashing, email
-send, JWT issuance, and rate limiting arrive in the Phase 1 auth PR.
-The route signatures are fixed so the UI can be built against them
-while the backend catches up.
+Rate limits (settings):
+    * ``otp_max_per_hour``  — caps requests per email per rolling hour.
+    * ``otp_resend_cooldown_seconds`` — minimum gap between requests.
+    * ``otp_max_attempts``  — how many wrong codes one OTP tolerates.
+    * ``otp_expiry_seconds`` — TTL for an issued OTP.
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import select
+
+from hermes.api.deps import DbSession
+from hermes.auth import allowlist
+from hermes.auth.email import send_otp_code
+from hermes.auth.jwt import issue_token
+from hermes.auth.otp import generate_code, hash_code, verify_code
+from hermes.config import get_settings
+from hermes.db.models import User, UserOtp
+from hermes.logging import get_logger
 
 router = APIRouter()
+_log = get_logger(__name__, component="auth")
 
 
 # ─── Request / response shapes ─────────────────────────────────────
@@ -59,6 +69,81 @@ class TokenResponse(BaseModel):
     expires_in: int
 
 
+# ─── Helpers ───────────────────────────────────────────────────────
+
+
+async def _get_or_create_user(session: DbSession, email: str) -> User:
+    """Find the User row for ``email``; create one if the address is new.
+
+    The allowlist check is done by the caller — by the time we land
+    here the email is allowed. We don't pre-populate users via
+    migrations because the allowlist is the source of truth.
+    """
+    existing = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    if existing is not None:
+        return existing
+    user = User(email=email, is_admin=False, is_enabled=True)
+    session.add(user)
+    await session.flush()
+    return user
+
+
+async def _check_rate_limits(session: DbSession, user: User) -> None:
+    """
+    Enforce per-email rate limits. Raises 429 on violation.
+
+    Per-hour cap: count OTPs created in the last hour.
+    Cooldown:     reject if the most recent OTP is too fresh.
+    """
+    settings = get_settings()
+    now = datetime.now(tz=UTC)
+
+    # Most recent OTP for this user (cooldown gate).
+    last = (
+        await session.execute(
+            select(UserOtp)
+            .where(UserOtp.user_id == user.user_id)
+            .order_by(UserOtp.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if last is not None:
+        # SQLAlchemy returns timezone-naive datetimes for some Postgres
+        # builds depending on the driver — coerce to UTC for safety.
+        last_created = last.created_at
+        if last_created.tzinfo is None:
+            last_created = last_created.replace(tzinfo=UTC)
+        elapsed = (now - last_created).total_seconds()
+        if elapsed < settings.otp_resend_cooldown_seconds:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    f"another code can be requested in "
+                    f"{int(settings.otp_resend_cooldown_seconds - elapsed)} s"
+                ),
+            )
+
+    # Per-hour cap.
+    one_hour_ago = now - timedelta(hours=1)
+    rows = (
+        (
+            await session.execute(
+                select(UserOtp).where(
+                    UserOtp.user_id == user.user_id,
+                    UserOtp.created_at >= one_hour_ago,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if len(rows) >= settings.otp_max_per_hour:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="hourly OTP request quota exceeded",
+        )
+
+
 # ─── Routes ────────────────────────────────────────────────────────
 
 
@@ -67,33 +152,106 @@ class TokenResponse(BaseModel):
     status_code=status.HTTP_204_NO_CONTENT,
     responses={204: {"description": "Always. Do not expose allowlist membership."}},
 )
-async def request_otp(payload: OtpRequest) -> None:
+async def request_otp(payload: OtpRequest, session: DbSession) -> None:
     """
-    Request an OTP for `payload.email`.
+    Generate an OTP and email it.
 
     Returns 204 regardless of whether the email is allowlisted — this
-    is intentional to prevent account enumeration.
-
-    TODO(phase-1-auth): generate OTP, hash with argon2id, persist, email.
+    is intentional to prevent account enumeration. Rate-limit
+    violations DO surface as 429 so the operator knows to wait.
     """
-    _ = payload  # stub
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="OTP request not yet implemented (scaffold only)",
+    email = payload.email.lower()
+    if not allowlist.is_allowed(email):
+        _log.info("otp_request_for_disallowed_email", email=email)
+        return  # 204 — silently swallow
+
+    user = await _get_or_create_user(session, email)
+    await _check_rate_limits(session, user)
+
+    code = generate_code()
+    settings = get_settings()
+    now = datetime.now(tz=UTC)
+    otp_row = UserOtp(
+        user_id=user.user_id,
+        code_hash=hash_code(code),
+        expires_at=now + timedelta(seconds=settings.otp_expiry_seconds),
     )
+    session.add(otp_row)
+    await session.commit()
+
+    try:
+        await send_otp_code(to=email, code=code)
+    except Exception:
+        # Email backend failures shouldn't leak through the 204 path —
+        # log and swallow. The row is in the DB so the operator can
+        # still verify if the email arrived.
+        _log.exception("otp_email_send_failed", email=email)
 
 
 @router.post("/otp/verify", response_model=TokenResponse)
-async def verify_otp(payload: OtpVerify) -> TokenResponse:
-    """
-    Verify an OTP; on success, return a signed JWT.
+async def verify_otp(payload: OtpVerify, session: DbSession) -> TokenResponse:
+    """Verify the code; on success, return a short-lived JWT."""
+    email = payload.email.lower()
+    settings = get_settings()
+    now = datetime.now(tz=UTC)
 
-    TODO(phase-1-auth): argon2-verify, mark OTP consumed, issue JWT.
-    """
-    _ = payload  # stub
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="OTP verify not yet implemented (scaffold only)",
+    user = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    if user is None or not user.is_enabled:
+        # Same response as a wrong code, on purpose.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid email or code",
+        )
+
+    # Most recent unconsumed, unexpired OTP for this user. Older ones
+    # are ignored — the operator might have requested several before
+    # the right one arrived.
+    otp = (
+        await session.execute(
+            select(UserOtp)
+            .where(
+                UserOtp.user_id == user.user_id,
+                UserOtp.consumed_at.is_(None),
+                UserOtp.expires_at > now,
+            )
+            .order_by(UserOtp.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    if otp is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid email or code",
+        )
+
+    if otp.attempt_count >= settings.otp_max_attempts:
+        # Lock the OTP — caller must request a new one.
+        otp.consumed_at = now
+        await session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="too many attempts; request a new code",
+        )
+
+    if not verify_code(payload.otp, otp.code_hash):
+        otp.attempt_count = otp.attempt_count + 1
+        await session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid email or code",
+        )
+
+    # Success.
+    otp.consumed_at = now
+    user.last_login_at = now
+    await session.commit()
+
+    token = issue_token(user.user_id)
+    return TokenResponse(
+        access_token=token,
+        token_type="bearer",
+        expires_in=settings.hermes_jwt_expiry_seconds,
     )
 
 
