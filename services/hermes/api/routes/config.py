@@ -33,7 +33,7 @@ from dataclasses import asdict
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, HTTPException, Path, Request, status
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -234,8 +234,16 @@ async def _delete_parameter(
     return True
 
 
-async def _hot_reload(request: Request) -> DbConfigProvider:
-    """Tell the running pipeline to refresh its config + drop cached detectors."""
+async def _commit_and_reload(request: Request, session: AsyncSession) -> DbConfigProvider:
+    """
+    Commit the route's parameter changes, then refresh the live provider
+    and drop cached detectors.
+
+    The commit MUST happen before ``provider.reload()`` because the
+    provider opens its own session via ``async_session()`` — that fresh
+    transaction can't see this route's uncommitted INSERT/UPDATE rows.
+    """
+    await session.commit()
     provider = _provider_or_503(request)
     await provider.reload()
     pipeline = getattr(request.app.state, "ingest_pipeline", None)
@@ -250,6 +258,30 @@ def _cache_to_dict(cache: object, type_name: TypeName) -> dict[str, Any]:
     """Pull the matching dataclass off a _ConfigCache and asdict() it."""
     attr = type_name  # _ConfigCache fields are named type_a / type_b / type_c / type_d
     return asdict(getattr(cache, attr))
+
+
+def _validate_or_422(type_name: TypeName, payload: dict[str, Any]) -> BaseModel:
+    """
+    Run Pydantic validation against the right TypeXIn model and re-raise
+    failures as ``HTTPException(422)`` so FastAPI surfaces the same shape
+    it would for a parameter-binding error. Without this, a manual
+    ``model_validate`` inside the handler raises ``ValidationError`` and
+    bubbles as a 500.
+
+    ``include_context=False`` is required: Pydantic v2's default error
+    output includes the underlying ``ValueError`` instance in
+    ``ctx.error``, which is not JSON-serialisable and would crash the
+    response writer with a ``TypeError`` before the 422 reaches the
+    client.
+    """
+    pyd_cls = _PYDANTIC_FOR_TYPE[type_name]
+    try:
+        return pyd_cls.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=exc.errors(include_url=False, include_context=False),
+        ) from exc
 
 
 # ─── Routes — global config ────────────────────────────────────────
@@ -276,8 +308,7 @@ async def put_type_a(
         device_id=None,
         sensor_id=None,
     )
-    await session.flush()
-    await _hot_reload(request)
+    await _commit_and_reload(request, session)
     return TypeAIn(**asdict(_provider_or_503(request).type_a_for(0, 0)))
 
 
@@ -302,8 +333,7 @@ async def put_type_b(
         device_id=None,
         sensor_id=None,
     )
-    await session.flush()
-    await _hot_reload(request)
+    await _commit_and_reload(request, session)
     return TypeBIn(**asdict(_provider_or_503(request).type_b_for(0, 0)))
 
 
@@ -328,8 +358,7 @@ async def put_type_c(
         device_id=None,
         sensor_id=None,
     )
-    await session.flush()
-    await _hot_reload(request)
+    await _commit_and_reload(request, session)
     return TypeCIn(**asdict(_provider_or_503(request).type_c_for(0, 0)))
 
 
@@ -354,8 +383,7 @@ async def put_type_d(
         device_id=None,
         sensor_id=None,
     )
-    await session.flush()
-    await _hot_reload(request)
+    await _commit_and_reload(request, session)
     return TypeDIn(**asdict(_provider_or_503(request).type_d_for(0, 0)))
 
 
@@ -400,8 +428,7 @@ async def put_device_override(
     must validate against the detector's Pydantic model (Type{A,B,C,D}In).
     """
     del user
-    pyd_cls = _PYDANTIC_FOR_TYPE[type_name]
-    validated = pyd_cls.model_validate(payload)
+    validated = _validate_or_422(type_name, payload)
     provider = _provider_or_503(request)
     await _upsert_parameter(
         session,
@@ -412,8 +439,7 @@ async def put_device_override(
         device_id=device_id,
         sensor_id=None,
     )
-    await session.flush()
-    await _hot_reload(request)
+    await _commit_and_reload(request, session)
     return validated.model_dump()
 
 
@@ -443,8 +469,7 @@ async def delete_device_override(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"no {type_name} device override for device {device_id}",
         )
-    await session.flush()
-    await _hot_reload(request)
+    await _commit_and_reload(request, session)
 
 
 @router.put(
@@ -461,8 +486,7 @@ async def put_sensor_override(
     session: DbSession,
 ) -> dict[str, Any]:
     del user
-    pyd_cls = _PYDANTIC_FOR_TYPE[type_name]
-    validated = pyd_cls.model_validate(payload)
+    validated = _validate_or_422(type_name, payload)
     provider = _provider_or_503(request)
     await _upsert_parameter(
         session,
@@ -473,8 +497,7 @@ async def put_sensor_override(
         device_id=device_id,
         sensor_id=sensor_id,
     )
-    await session.flush()
-    await _hot_reload(request)
+    await _commit_and_reload(request, session)
     return validated.model_dump()
 
 
@@ -505,8 +528,7 @@ async def delete_sensor_override(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=(f"no {type_name} sensor override for device {device_id} sensor {sensor_id}"),
         )
-    await session.flush()
-    await _hot_reload(request)
+    await _commit_and_reload(request, session)
 
 
 # Suppress unused-import warnings; the dataclass types are referenced via
