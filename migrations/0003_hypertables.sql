@@ -24,6 +24,17 @@ SELECT create_hypertable(
     if_not_exists       => TRUE
 );
 
+-- Compression settings for events. Required BEFORE add_compression_policy
+-- in 0005 — Timescale rejects the policy with "compression not enabled"
+-- otherwise. `segmentby` groups by sensor so per-sensor scans stay fast
+-- on compressed chunks; `orderby` keeps rows time-sorted within each
+-- segment for run-length encoding on the timestamp.
+ALTER TABLE events SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'device_id, sensor_id',
+    timescaledb.compress_orderby   = 'triggered_at DESC'
+);
+
 -- Indexes created in 0002 automatically propagate to each chunk.
 
 -- ─── session_samples ───────────────────────────────────────────────
