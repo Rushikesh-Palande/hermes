@@ -2,16 +2,20 @@ Source: hermes
 Section: misc
 Priority: optional
 Maintainer: EmbedSquare <ops@embedsquare.com>
-Build-Depends: debhelper-compat (= 13),
-               python3-all,
-               python3-venv,
-               nodejs,
-               npm
+# We deliberately keep Build-Depends minimal. dh-python and python3-all
+# would trigger dh-python's auto-detection of pyproject.toml and try to
+# build a wheel at .deb build time — we skip that with --without python3
+# in debian/rules. nodejs/npm/pnpm are handled in the workflow's "Install
+# build deps" step (system apt's nodejs is too old for SvelteKit).
+Build-Depends: debhelper-compat (= 13)
 Standards-Version: 4.6.2
 Homepage: https://github.com/Rushikesh-Palande/hermes
 
 Package: hermes
-Architecture: any
+# Architecture: all — the package is pure Python source + a JS bundle.
+# The platform-specific Python venv is built at install time by
+# packaging/install.sh (postinst) so wheels match the host's libc/glibc.
+Architecture: all
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          python3.11,
