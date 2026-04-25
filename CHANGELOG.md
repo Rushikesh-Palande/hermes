@@ -8,6 +8,56 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.3] — 2026-04-25
+
+### Added
+
+- **MQTT ingestion pipeline (Phase 2)**: paho consumer hands raw payloads
+  to the asyncio event loop via `call_soon_threadsafe`; a single consumer
+  task does parse → STM32 clock anchor (5 s drift re-anchor) → per-sensor
+  offset correction → ring buffers. SSE feed at `/api/live_stream/{id}`
+  serves the live ring buffer with keepalive + per-tick batch cap.
+- **Device CRUD (Phase 3a)**: full REST surface at `/api/devices`
+  (list, create, get, patch, delete) with 1–999 ID range, 409 on
+  duplicate, 404 on missing, soft-disable via PATCH `is_active=false`.
+- **Detection framework + Types A/B/C/D (Phase 3b–d)**: per-sensor
+  detectors with O(1) incremental sliding windows. Type A (CV%),
+  Type B (post-window deviation, REF_VALUE = 100), Type C (range on
+  avg_T3), Type D (two-stage averaging vs. avg_T5, paired with Type C).
+  Debounce and data-gap reset semantics match the legacy spec.
+- **Event persistence (Phase 3e)**: `DbEventSink` queues events from
+  the detection hot path; an async writer task waits for the
+  `triggered_at + 9 s` deadline, slices the `EventWindowBuffer`, and
+  writes one `events` row + one `event_windows` row + back-link in a
+  single transaction. JSON-utf8 encoding now (zstd+delta-f32 later).
+- **Event history API (Phase 4a)**: `/api/events` list with filters
+  (device, sensor, type, time range), pagination, single-event get,
+  and decoded `±9 s` window endpoint.
+- **Config API (Phase 4b)**: `/api/config/type_{a,b,c,d}` GET/PUT,
+  backed by the `parameters` table at GLOBAL scope. PUT hot-reloads
+  the running engine without a process restart.
+- **SvelteKit dashboard pages (Phase 4c)**: Overview / Devices / Events /
+  Config, with a shared `$lib/api.ts` typed fetch client and Pydantic-
+  mirroring `$lib/types.ts`.
+- **Dev-mode auth bypass**: `HERMES_DEV_MODE=1` synthesises an admin
+  `User` so `CurrentUser`-protected routes work without JWT until the
+  full OTP flow lands in Phase 3.5.
+
+### Changed
+
+- `ensure_default_session()` now returns `(session_id, package_id)` so
+  callers can wire both at once. Boots a default Package + active
+  GLOBAL Session on first start; idempotent thereafter.
+- `IngestPipeline` accepts an optional `config_provider` and wires it
+  into `DetectionEngine`. The API lifespan supplies a `DbConfigProvider`;
+  fresh deployments default to all-disabled detectors.
+
+### Fixed
+
+- Migration integration test now uses `asyncpg.connect()` directly —
+  SQLAlchemy's `exec_driver_sql` still routes through asyncpg's prepare()
+  path which rejects multi-statement SQL.
+
 ## [0.1.0-alpha.2] — 2026-04-24
 
 ### Fixed
@@ -73,7 +123,8 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
   CODE_OF_CONDUCT, CODEOWNERS, issue and PR templates, Dependabot config,
   `.gitignore`, `.gitattributes`, `.editorconfig`.
 
-[Unreleased]:     https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.2...HEAD
+[Unreleased]:     https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.3...HEAD
+[0.1.0-alpha.3]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.2...v0.1.0-alpha.3
 [0.1.0-alpha.2]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
 [0.1.0-alpha.1]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.0.1...v0.1.0-alpha.1
 [0.0.1]:          https://github.com/Rushikesh-Palande/hermes/releases/tag/v0.0.1
