@@ -18,9 +18,8 @@ Lifecycle:
       device; it discards the cached detectors so fresh config takes
       effect on the next sample.
 
-Phase 3b/c covers Type A only. Types B/C/D land in Phase 3d — the
-registry is already shaped to hold them (the ``EventType`` axis of the
-cache key).
+All four detector classes (Types A/B/C/D) are wired here. BREAK events
+land with mode switching in a later phase.
 """
 
 from __future__ import annotations
@@ -30,15 +29,17 @@ from hermes.detection.config import DetectorConfigProvider
 from hermes.detection.type_a import TypeADetector
 from hermes.detection.type_b import TypeBDetector
 from hermes.detection.type_c import TypeCDetector
+from hermes.detection.type_d import TypeDDetector
 from hermes.detection.types import EventSink, Sample, SensorDetector
 
 # Fixed event-type order. Kept deterministic so tests can rely on it.
-# Type D will be appended here in Phase 3d.2 with the C-dependency wired
-# through ``_create``.
+# Type D MUST come after Type C: D reads C's ``current_avg`` for the
+# same sample tick, so C must run first.
 _EVENT_TYPE_ORDER: tuple[EventType, ...] = (
     EventType.A,
     EventType.B,
     EventType.C,
+    EventType.D,
 )
 
 # A compound key per detector instance: (device_id, sensor_id, event_type).
@@ -100,5 +101,16 @@ class DetectionEngine:
             return TypeBDetector(self._config_provider.type_b_for(device_id, sensor_id))
         if event_type is EventType.C:
             return TypeCDetector(self._config_provider.type_c_for(device_id, sensor_id))
-        # Type D lands in Phase 3d.2; BREAK events arrive with mode switching.
+        if event_type is EventType.D:
+            # D depends on C's ``current_avg``; fetch (or lazily create) C
+            # for the same (device, sensor) before constructing D.
+            c_detector = self._detector_for(device_id, sensor_id, EventType.C)
+            assert isinstance(c_detector, TypeCDetector), (
+                "Type C detector slot must hold a TypeCDetector"
+            )
+            return TypeDDetector(
+                self._config_provider.type_d_for(device_id, sensor_id),
+                c_detector,
+            )
+        # BREAK events arrive with mode switching in a later phase.
         raise NotImplementedError(f"detector for {event_type} not yet implemented")
