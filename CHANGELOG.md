@@ -8,6 +8,60 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.16] — 2026-04-25
+
+### Documentation overhaul
+
+No code changes. README + new ARCHITECTURE doc + packaging update so a
+developer arriving at the repo can be productive within an hour.
+
+### Added
+
+- **`docs/design/ARCHITECTURE.md`** (~600 lines, ~30 min read) — the
+  end-to-end design doc for the rewrite. Covers design philosophy,
+  operating constraints, the component map, the `hermes-ingest` hot
+  path with threading model, the detection engine, the API process,
+  the data layer, tests/CI, a "common tasks → which file" lookup
+  table, and a "things that look weird but are correct" appendix
+  catching non-obvious invariants (sampled `time_stage`, 9 s post-
+  window fence, pre-bound locals in `_consume`, `TRUNCATE`-not-
+  `DROP-SCHEMA` between integration tests, etc.).
+
+### Changed
+
+- **`README.md`** rewritten:
+  - Status section now reflects every shipped alpha release with one-
+    line headlines, plus the gap-list status (1-9) and the perf-layer
+    status (Layers 1-3).
+  - Architecture diagrams for both single-process default and the
+    multi-shard opt-in mode.
+  - Quick-start expanded with the actual commands a new developer
+    runs.
+  - Repository layout updated to include `packaging/systemd/`,
+    `docs/design/MULTI_SHARD.md`, and the metric files.
+  - New cross-link table pointing at every contract and design doc.
+  - Testing section documenting all four tiers (unit / integration /
+    bench / golden) with marker examples.
+  - Performance section publishing per-release bench numbers
+    (alpha.12: 8 589 msg/s; alpha.14: 16 746; alpha.15: 17 117).
+  - **Configuration reference** — every `Settings` field documented
+    with purpose, default, and grouping (required / MQTT / Detection /
+    Multi-shard / Observability / API / OTP).
+  - Production-deployment section pointing at `packaging/systemd/` and
+    the multi-shard rollout guide.
+- **`packaging/README.md`** updated: the `systemd/` subdirectory is no
+  longer a placeholder. Documents the four shipped units (`hermes-api`,
+  `hermes-ingest`, `hermes-ingest@`, `hermes.target`) with their roles
+  and cross-links to `MULTI_SHARD.md` §7 for deployment / rollback.
+
+### Doc discipline (going forward)
+
+Every gap/feature/perf-layer ship now updates the relevant docs in the
+SAME release. Stale docs are the #1 onboarding tax — we don't
+accumulate that debt.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
 ## [0.1.0-alpha.15] — 2026-04-25
 
 ### Architecture — Layer 3 (multi-process horizontal scaling)
