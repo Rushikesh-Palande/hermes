@@ -87,6 +87,56 @@ class TypeCConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ModeSwitchingConfig:
+    """
+    Per-(device, sensor) mode-switching configuration (gap 3).
+
+    Mode switching gates A/B/C/D detection by a sensor's current mode
+    (POWER_ON / STARTUP / BREAK):
+
+        * POWER_ON — initial state. No detection. Transitions to STARTUP
+          once the sensor sustains ``raw_value > startup_threshold`` for
+          ``startup_duration_seconds`` (with a transient-dip grace
+          window of ``startup_reset_grace_s``).
+        * STARTUP — running / active state. Detection runs normally.
+          Transitions to BREAK if the sensor sustains
+          ``raw_value < break_threshold`` for
+          ``break_duration_seconds`` continuously, at which point a
+          BREAK event fires with timestamp = the FIRST below-threshold
+          sample's wall time (not the moment the duration elapsed).
+        * BREAK — fault state. No detection. Recovers to STARTUP under
+          the same condition that took POWER_ON → STARTUP. NO new BREAK
+          event fires on this recovery.
+
+    When ``enabled=False`` (the default — matches the legacy
+    ``mode_switching_enabled`` config knob), every sensor is treated as
+    if always in STARTUP and detection runs unconditionally.
+
+    Per-sensor overrides are scope-resolved by the same SENSOR → DEVICE
+    → GLOBAL walk used by Type A/B/C/D. The legacy system does not have
+    a per-sensor ``enabled`` flag; it's device-wide. We carry it on the
+    dataclass anyway because the storage shape is identical to the
+    other detector configs and the API can accept it as long as it
+    makes sense at the GLOBAL scope.
+    """
+
+    enabled: bool = False
+    startup_threshold: float = 100.0
+    break_threshold: float = 50.0
+    # Minimum duration clamps match legacy (clamped at 0.001 s, line
+    # 366-367 of legacy event_detector.py). Don't reduce these without
+    # a contract update — operators may have set 0.0 expecting "fire as
+    # fast as possible" and we must not change that semantics.
+    startup_duration_seconds: float = 0.1
+    break_duration_seconds: float = 2.0
+    # Grace window for transient drops below startup_threshold while
+    # still in POWER_ON / BREAK waiting to transition to STARTUP. A
+    # brief dip < this duration is forgiven; a sustained one resets
+    # the startup timer. Hardcoded 1.0 s in legacy (line 396).
+    startup_reset_grace_s: float = 1.0
+
+
+@dataclass(frozen=True, slots=True)
 class TypeDConfig:
     """
     Type D (two-stage averaging on avg_T5) detector configuration.
@@ -133,6 +183,7 @@ class DetectorConfigProvider(Protocol):
     def type_b_for(self, device_id: int, sensor_id: int) -> TypeBConfig: ...
     def type_c_for(self, device_id: int, sensor_id: int) -> TypeCConfig: ...
     def type_d_for(self, device_id: int, sensor_id: int) -> TypeDConfig: ...
+    def mode_switching_for(self, device_id: int, sensor_id: int) -> ModeSwitchingConfig: ...
 
 
 class StaticConfigProvider:
@@ -150,11 +201,15 @@ class StaticConfigProvider:
         type_b: TypeBConfig | None = None,
         type_c: TypeCConfig | None = None,
         type_d: TypeDConfig | None = None,
+        mode_switching: ModeSwitchingConfig | None = None,
     ) -> None:
         self._type_a = type_a if type_a is not None else TypeAConfig()
         self._type_b = type_b if type_b is not None else TypeBConfig()
         self._type_c = type_c if type_c is not None else TypeCConfig()
         self._type_d = type_d if type_d is not None else TypeDConfig()
+        self._mode_switching = (
+            mode_switching if mode_switching is not None else ModeSwitchingConfig()
+        )
 
     def type_a_for(self, device_id: int, sensor_id: int) -> TypeAConfig:
         del device_id, sensor_id
@@ -171,3 +226,7 @@ class StaticConfigProvider:
     def type_d_for(self, device_id: int, sensor_id: int) -> TypeDConfig:
         del device_id, sensor_id
         return self._type_d
+
+    def mode_switching_for(self, device_id: int, sensor_id: int) -> ModeSwitchingConfig:
+        del device_id, sensor_id
+        return self._mode_switching

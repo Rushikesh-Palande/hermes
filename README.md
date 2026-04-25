@@ -51,6 +51,8 @@ detection engine is enforced by golden-traffic regression tests.
 
 | Version              | Headline                                                              |
 | -------------------- | --------------------------------------------------------------------- |
+| `v0.1.0-alpha.17`    | Mode switching (POWER_ON / STARTUP / BREAK) + BREAK event emission    |
+| `v0.1.0-alpha.16`    | Documentation overhaul: detailed README + ARCHITECTURE.md             |
 | `v0.1.0-alpha.15`    | Layer 3 multi-process shard mode + Postgres LISTEN/NOTIFY config sync |
 | `v0.1.0-alpha.14`    | Layer 1 micro-opts: orjson, log discipline, hot-path locals (~2× msg/s) |
 | `v0.1.0-alpha.13`    | TTL gate dedupes + prioritises events before durable sinks             |
@@ -69,7 +71,7 @@ nine areas where the rewrite must reach parity. Status:
 | --- | ---------------------------------------------- | ---------------------------------------- |
 | 1   | Outbound MQTT event publish                    | ✅ Shipped (alpha.11)                    |
 | 2   | TTL gate (5 s dedup + priority + BREAK bypass) | ✅ Shipped (alpha.13)                    |
-| 3   | Mode switching (POWER_ON/STARTUP/BREAK/NORMAL) | ⏳ Next                                  |
+| 3   | Mode switching (POWER_ON/STARTUP/BREAK)        | ✅ Shipped (alpha.17)                    |
 | 4   | MQTT broker config UI                          | ⏳ Pending (model exists, no UI)         |
 | 5   | Sessions UI (start/stop/attach package)        | ⏳ Pending                               |
 | 6   | Continuous-sample writer (`session_samples`)   | ⏳ Pending                               |
@@ -386,6 +388,12 @@ hours into a soak.
 | `LIVE_BUFFER_MAX_SAMPLES` | `2000` | Per-device ring buffer depth. At 100 Hz this is ~20 s of history.        |
 | `MQTT_DRIFT_THRESHOLD_S`  | `5.0`  | Re-anchor STM32 clock if computed wall time diverges from receive time   |
 |                         |         | by more than this.                                                       |
+
+Detection thresholds (Type A/B/C/D plus mode switching) are NOT
+controlled by env vars — they're written via `PUT /api/config/...` and
+stored as `parameters` rows scoped GLOBAL / DEVICE / SENSOR. Mode
+switching is `enabled=False` by default so existing deployments behave
+identically to alpha.16.
 
 ### Multi-shard (Layer 3, see `docs/design/MULTI_SHARD.md`)
 

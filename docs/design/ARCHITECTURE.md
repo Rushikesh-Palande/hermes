@@ -230,6 +230,36 @@ State is reset (`reset_device(device_id)`) when:
 - A multi-shard config-changed `NOTIFY` arrives (Layer 3)
 - A long data gap (`> data_gap_reset_s`) is detected on a sensor
 
+### 4.2a Mode switching (gap 3, alpha.17)
+
+A separate `ModeStateMachine`
+([`services/hermes/detection/mode_switching.py`](../../services/hermes/detection/mode_switching.py))
+tracks each (device, sensor) pair through three modes — `POWER_ON`,
+`STARTUP`, `BREAK` — and gates A/B/C/D detection accordingly:
+
+| Mode      | Type A             | Types B/C/D         | BREAK emission                  |
+| --------- | ------------------ | ------------------- | ------------------------------- |
+| POWER_ON  | feeds, fires SUPPRESSED | skipped entirely    | none                            |
+| STARTUP   | runs normally      | run normally        | on sustained drop below `break_threshold` |
+| BREAK     | feeds, fires SUPPRESSED | skipped entirely    | already emitted; recovery is silent |
+
+`enabled=False` by default — every sensor is treated as STARTUP and
+detection runs unconditionally, matching pre-alpha.17 behaviour.
+
+The BREAK event's `triggered_at` is the FIRST below-threshold sample's
+wall time, NOT the moment the duration elapsed. Operators have alarms
+wired to that earlier timestamp; preserving it is a hard contract
+invariant. `BREAK` events bypass the TTL gate (already implemented in
+alpha.13) and flow straight to the durable sinks.
+
+Implementation lives outside `DetectionEngine` because the state
+machine has its own non-trivial state (six per-sensor timestamps + a
+mode integer) and its own configuration object. Keeping it isolated
+keeps the engine focused on detector routing and lets parity tests
+focus on a single piece of behaviour. See
+[`docs/contracts/EVENT_DETECTION_CONTRACT.md`](../contracts/EVENT_DETECTION_CONTRACT.md)
+§2.3 and §7 for the legacy spec.
+
 ### 4.3 Configuration flow
 
 ```
@@ -254,7 +284,8 @@ multi-shard, the same `NOTIFY` triggers reload + reset in every shard.
 
 | File                                                | Owns                                                              |
 | --------------------------------------------------- | ----------------------------------------------------------------- |
-| `services/hermes/detection/engine.py`               | `DetectionEngine` — fan-out per (device, sensor) per type         |
+| `services/hermes/detection/engine.py`               | `DetectionEngine` — fan-out per (device, sensor) per type, mode gating |
+| `services/hermes/detection/mode_switching.py`       | `ModeStateMachine` — POWER_ON / STARTUP / BREAK + BREAK emission   |
 | `services/hermes/detection/db_config.py`            | `DbConfigProvider` — DB-backed config + LISTEN                    |
 | `services/hermes/detection/config.py`               | `TypeAConfig` etc. dataclasses + `StaticConfigProvider`           |
 | `services/hermes/detection/sink.py`                 | `LoggingEventSink`, `MultiplexEventSink`                          |
