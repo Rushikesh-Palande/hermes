@@ -8,6 +8,85 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.23] — 2026-04-26
+
+### Golden-traffic harness — gap 9
+
+Replays a recorded (or synthetic) MQTT trace through the rewrite's
+detection pipeline and asserts the resulting events match a saved
+baseline. This is the mechanism that catches behaviour drift between
+releases — and, once real production-hardware captures arrive, the
+mechanism that will assert byte-identical parity with the legacy
+system per
+[`docs/contracts/GOLDEN_TRAFFIC_PLAN.md`](./docs/contracts/GOLDEN_TRAFFIC_PLAN.md).
+
+### Added
+
+- **`tests/golden/harness.py`** — deterministic replay engine.
+  `recv_ts` from each frame in the corpus is the authoritative
+  wall time; the harness feeds frames straight into
+  `DetectionEngine.feed_snapshot` (no asyncio queue, no real-time
+  sleep), so a 24 h trace runs in seconds and produces the same
+  output every run.
+  - `replay(corpus_path, cfg) -> list[CapturedEvent]` — runs the
+    pipeline and returns captured events.
+  - `assert_matches_baseline(actual, baseline_path)` — strict
+    per-row JSON comparison. `HERMES_GOLDEN_UPDATE=1` re-blesses.
+  - `CapturedEvent` rounds `triggered_at` to microsecond precision
+    and rounds metadata floats to 6 decimal places so cross-platform
+    float noise doesn't false-fail.
+- **`tests/golden/_generate.py`** — pure-Python (`math`/`random`,
+  fixed seed) generators for three synthetic scenarios. NumPy
+  intentionally NOT used because the corpora must be byte-stable
+  across NumPy versions.
+- **3 synthetic corpora** (`tests/golden/corpora/`):
+  - `type_a_high_variance.ndjson` — 5 s trace; sensor 1 develops a
+    square-wave high-CV signal halfway through. Exercises the
+    Type A variance detector.
+  - `mode_break.ndjson` — 2.5 s trace; sensor 5 sustains
+    above-startup, then drops below break_threshold for >0.5 s.
+    Exercises POWER_ON → STARTUP → BREAK and verifies the
+    triggered_at = first below-threshold sample invariant from gap 3.
+  - `stable_sine.ndjson` — 2 s low-amplitude sine. Smoke baseline
+    that catches false-positive regressions (must produce zero
+    events).
+- **3 pinned baselines** in `tests/golden/baselines/` checked into
+  git. Each baseline file is sort-keyed JSON-per-line so diffs are
+  reviewable in PRs.
+- **3 round-trip tests** (`tests/golden/test_synthetic_corpora.py`):
+  - `test_type_a_high_variance` — Type A fires only on sensor 1
+    after the variance ramps; baseline matches exactly.
+  - `test_mode_break_transition` — exactly one BREAK on sensor 5
+    with `triggered_at` = the first below-threshold timestamp.
+  - `test_stable_sine_fires_nothing` — baseline-less smoke; asserts
+    the captured events list is empty.
+- **`golden` pytest marker** registered in `pyproject.toml`. Run
+  with `pytest -m golden`. Re-bless with `HERMES_GOLDEN_UPDATE=1
+  pytest -m golden`.
+- **`tests/golden/README.md`** — operator-facing doc covering
+  layout, how to add a corpus, and the rebless flow.
+
+### Out of scope (deliberate, lands when production-hardware captures arrive)
+
+- Real legacy MQTT captures + `observed.sqlite` diff vs the
+  rewrite. The contract defines the diff shape; the harness already
+  has the replay + baseline infrastructure to drop captures into
+  `corpora/` and add `baselines/` snapshots. No code changes
+  required when they arrive.
+- Outbound MQTT publish capture (separate from event capture). The
+  harness-collected `CapturedEvent` covers detection output; a
+  follow-up can wire a similar collector to the `MqttEventSink`
+  for the publish-stream comparison the contract calls out.
+- Golden tests in CI. The new `golden` marker keeps them out of
+  the default run; CI integration lands as a small workflow update
+  once we have at least one real-hardware baseline so we don't
+  block PRs on synthetic-only signal.
+
+Total tests now: 197 unit + 133 integration + 3 golden = 333
+passing. Bench unchanged.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
 ## [0.1.0-alpha.22] — 2026-04-26
 
 ### System-tunables UI — gap 8 (read-only)
