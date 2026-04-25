@@ -1,5 +1,5 @@
 """
-MQTT consumer — Phase 2: real parsing, clock anchoring, offset correction.
+MQTT consumer — Phase 2 + 3 (parser, clock, offsets, detection, persistence).
 
 Pipeline (all on the asyncio event loop after the callback hand-off):
 
@@ -12,15 +12,22 @@ Pipeline (all on the asyncio event loop after the callback hand-off):
         → parse_stm32_adc_payload   → {sensor_id: raw_float}
         → ClockRegistry.anchor      → wall_ts
         → OffsetCache.apply         → {sensor_id: corrected_float}
-        → LiveDataHub.push          → ring buffer (SSE reads from here)
+        → LiveDataHub.push          → live ring buffer (SSE reads from here)
+        → EventWindowBuffer.push    → 30 s ring buffer (DB sink reads from here)
+        → DetectionEngine.feed_snapshot
+            → for each detected event: DbEventSink.publish (queues for write)
 
-Embedding in the API process (Phase 2):
-    The API lifespan creates an IngestPipeline and stores its ``live_data``
-    handle on ``app.state``. The SSE endpoint reads from there.
+    DbEventSink._writer_loop (event loop, background task)
+        → for each event: wait until triggered_at + 9 s, slice the
+          window buffer, write events + event_windows in one tx.
+
+Embedding in the API process:
+    The API lifespan creates an IngestPipeline and stores its
+    ``live_data`` handle on ``app.state``. The SSE endpoint reads from
+    there. The DB sink is started/stopped alongside the pipeline.
 
 Standalone mode:
-    ``hermes-ingest`` calls ``run()``, which owns the SIGTERM handler and
-    runs until the process is killed.
+    ``hermes-ingest`` calls ``run()``, which owns the SIGTERM handler.
 
 Why paho-mqtt and not gmqtt or aiomqtt:
     Proven in the legacy system at 123 Hz × 12 sensors × 20 devices
@@ -49,8 +56,12 @@ from hermes.config import Settings, get_settings
 from hermes.db.engine import async_session, dispose_engine
 from hermes.db.models import SensorOffset
 from hermes.detection.config import StaticConfigProvider, TypeAConfig
+from hermes.detection.db_sink import DbEventSink
 from hermes.detection.engine import DetectionEngine
+from hermes.detection.session import ensure_default_session
 from hermes.detection.sink import LoggingEventSink
+from hermes.detection.types import EventSink
+from hermes.detection.window_buffer import EventWindowBuffer
 from hermes.ingest.clock import ClockRegistry
 from hermes.ingest.live_data import LiveDataHub
 from hermes.ingest.offsets import OffsetCache
@@ -82,6 +93,7 @@ async def _consume(
     clocks: ClockRegistry,
     offsets: OffsetCache,
     live: LiveDataHub,
+    window_buffer: EventWindowBuffer,
     detection: DetectionEngine,
     stop_event: asyncio.Event,
 ) -> None:
@@ -119,10 +131,11 @@ async def _consume(
         # --- Apply per-sensor calibration offsets ---
         sensor_values = offsets.apply(device_id, sensor_values)
 
-        # --- Feed live ring buffer ---
+        # --- Feed live ring buffer (SSE) and window buffer (event capture) ---
         live.push(device_id, ts, sensor_values)
+        window_buffer.push_snapshot(device_id, ts, sensor_values)
 
-        # --- Feed detection engine (Type A only in Phase 3b/c) ---
+        # --- Feed detection engine ---
         detection.feed_snapshot(device_id, ts, sensor_values)
 
         log.debug(
@@ -146,20 +159,45 @@ class IngestPipeline:
         await pipeline.stop()
 
     The standalone ``run()`` function below wraps this class for CLI use.
+
+    DB persistence:
+        If a session_id is provided at construction, the pipeline uses
+        ``DbEventSink`` (writes events + windows). If None, it falls back
+        to ``LoggingEventSink`` (no DB writes — useful for tests and for
+        running ingest before the schema is provisioned).
     """
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        session_id: object | None = None,
+    ) -> None:
         self._settings = settings
         self.live_data = LiveDataHub(maxlen=settings.live_buffer_max_samples)
+        self.window_buffer = EventWindowBuffer()
         self._offsets = OffsetCache()
         self._clocks = ClockRegistry(drift_threshold_s=settings.mqtt_drift_threshold_s)
-        # Detection: Type A is disabled by default so an out-of-the-box
-        # deployment does not fire spurious events before the operator
-        # has configured thresholds. The DB-backed provider lands in
-        # Phase 3e and will override these defaults per-sensor.
+
+        # Detection: Type A is disabled by default so a fresh deployment
+        # does not fire spurious events. The DB-backed config provider
+        # (Phase 4) will override these per-sensor.
+        sink: EventSink
+        if session_id is not None:
+            import uuid as _uuid
+
+            assert isinstance(session_id, _uuid.UUID), "session_id must be a UUID when provided"
+            self._db_sink: DbEventSink | None = DbEventSink(
+                session_id=session_id,
+                window_buffer=self.window_buffer,
+            )
+            sink = self._db_sink
+        else:
+            self._db_sink = None
+            sink = LoggingEventSink()
+
         self._detection = DetectionEngine(
             config_provider=StaticConfigProvider(TypeAConfig(enabled=False)),
-            sink=LoggingEventSink(),
+            sink=sink,
         )
         self._stop_event = asyncio.Event()
         self._queue: asyncio.Queue[tuple[bytes, float]] = asyncio.Queue()
@@ -167,11 +205,14 @@ class IngestPipeline:
         self._client: mqtt.Client | None = None
 
     async def start(self) -> None:
-        """Connect to MQTT, load offsets, start the consumer task."""
+        """Connect to MQTT, load offsets, start writer + consumer tasks."""
         try:
             await _load_sensor_offsets(self._offsets)
         except Exception:
             log.warning("offset_load_failed_continuing", exc_info=True)
+
+        if self._db_sink is not None:
+            await self._db_sink.start()
 
         loop = asyncio.get_running_loop()
         settings = self._settings
@@ -230,6 +271,7 @@ class IngestPipeline:
                 self._clocks,
                 self._offsets,
                 self.live_data,
+                self.window_buffer,
                 self._detection,
                 self._stop_event,
             ),
@@ -239,7 +281,7 @@ class IngestPipeline:
         log.info("ingest_running", topic=settings.mqtt_topic_adc)
 
     async def stop(self) -> None:
-        """Signal the consumer, drain the queue, disconnect MQTT."""
+        """Signal the consumer, drain the queue, disconnect MQTT, stop the writer."""
         log.info("ingest_stopping")
         self._stop_event.set()
         if self._consumer_task is not None:
@@ -247,6 +289,8 @@ class IngestPipeline:
         if self._client is not None:
             self._client.loop_stop()
             self._client.disconnect()
+        if self._db_sink is not None:
+            await self._db_sink.stop()
 
 
 async def run() -> None:
@@ -263,7 +307,16 @@ async def run() -> None:
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, stop_event.set)
 
-    pipeline = IngestPipeline(settings)
+    # Bootstrap a default Package + Session so events have somewhere to
+    # land. Failures fall back to the logging sink so the ingest path
+    # still works against a not-yet-provisioned DB.
+    try:
+        session_id: object | None = await ensure_default_session()
+    except Exception:
+        log.exception("session_bootstrap_failed_continuing")
+        session_id = None
+
+    pipeline = IngestPipeline(settings, session_id=session_id)
     await pipeline.start()
 
     try:

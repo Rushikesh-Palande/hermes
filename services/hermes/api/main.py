@@ -44,6 +44,7 @@ from hermes import __version__
 from hermes.api.routes import auth, devices, health, live_stream
 from hermes.config import get_settings
 from hermes.db.engine import dispose_engine
+from hermes.detection.session import ensure_default_session
 from hermes.ingest.main import IngestPipeline
 from hermes.logging import configure_logging, get_logger
 
@@ -62,10 +63,21 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         dev_mode=settings.hermes_dev_mode,
     )
 
+    # Bootstrap a default Package + Session so detected events have
+    # somewhere to persist. Failures fall back to in-memory-only mode
+    # (no DB writes) so /api/health stays green when the schema isn't
+    # provisioned yet.
+    session_id: object | None
+    try:
+        session_id = await ensure_default_session()
+    except Exception:
+        log.exception("session_bootstrap_failed_continuing")
+        session_id = None
+
     # Spin up the embedded MQTT ingest pipeline. Failures here are
     # non-fatal — we want /api/health liveness to stay green even if the
     # broker is down, so the API can still serve static routes.
-    pipeline = IngestPipeline(settings)
+    pipeline = IngestPipeline(settings, session_id=session_id)
     try:
         await pipeline.start()
     except Exception:
