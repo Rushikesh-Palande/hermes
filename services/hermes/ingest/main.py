@@ -55,7 +55,11 @@ from sqlalchemy import select
 from hermes.config import Settings, get_settings
 from hermes.db.engine import async_session, dispose_engine
 from hermes.db.models import SensorOffset
-from hermes.detection.config import StaticConfigProvider, TypeAConfig
+from hermes.detection.config import (
+    DetectorConfigProvider,
+    StaticConfigProvider,
+    TypeAConfig,
+)
 from hermes.detection.db_sink import DbEventSink
 from hermes.detection.engine import DetectionEngine
 from hermes.detection.session import ensure_default_session
@@ -171,6 +175,7 @@ class IngestPipeline:
         self,
         settings: Settings,
         session_id: object | None = None,
+        config_provider: DetectorConfigProvider | None = None,
     ) -> None:
         self._settings = settings
         self.live_data = LiveDataHub(maxlen=settings.live_buffer_max_samples)
@@ -178,9 +183,6 @@ class IngestPipeline:
         self._offsets = OffsetCache()
         self._clocks = ClockRegistry(drift_threshold_s=settings.mqtt_drift_threshold_s)
 
-        # Detection: Type A is disabled by default so a fresh deployment
-        # does not fire spurious events. The DB-backed config provider
-        # (Phase 4) will override these per-sensor.
         sink: EventSink
         if session_id is not None:
             import uuid as _uuid
@@ -195,8 +197,13 @@ class IngestPipeline:
             self._db_sink = None
             sink = LoggingEventSink()
 
-        self._detection = DetectionEngine(
-            config_provider=StaticConfigProvider(TypeAConfig(enabled=False)),
+        # Default to a static all-disabled provider so a fresh deployment
+        # is silent until thresholds are written via /api/config. The API
+        # lifespan swaps in a DbConfigProvider once a session exists.
+        if config_provider is None:
+            config_provider = StaticConfigProvider(TypeAConfig(enabled=False))
+        self.detection_engine = DetectionEngine(
+            config_provider=config_provider,
             sink=sink,
         )
         self._stop_event = asyncio.Event()
@@ -272,7 +279,7 @@ class IngestPipeline:
                 self._offsets,
                 self.live_data,
                 self.window_buffer,
-                self._detection,
+                self.detection_engine,
                 self._stop_event,
             ),
             name="mqtt-consumer",
@@ -307,16 +314,22 @@ async def run() -> None:
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, stop_event.set)
 
-    # Bootstrap a default Package + Session so events have somewhere to
-    # land. Failures fall back to the logging sink so the ingest path
+    # Bootstrap a default Package + Session + DbConfigProvider so events
+    # have somewhere to land and the operator can write thresholds via
+    # the API. Failures fall back to the logging sink so the ingest path
     # still works against a not-yet-provisioned DB.
+    from hermes.detection.db_config import DbConfigProvider
+
+    session_id: object | None = None
+    config_provider: DbConfigProvider | None = None
     try:
-        session_id: object | None = await ensure_default_session()
+        session_id, package_id = await ensure_default_session()
+        config_provider = DbConfigProvider(package_id)
+        await config_provider.reload()
     except Exception:
         log.exception("session_bootstrap_failed_continuing")
-        session_id = None
 
-    pipeline = IngestPipeline(settings, session_id=session_id)
+    pipeline = IngestPipeline(settings, session_id=session_id, config_provider=config_provider)
     await pipeline.start()
 
     try:

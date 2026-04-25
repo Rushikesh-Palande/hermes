@@ -30,10 +30,14 @@ _log = get_logger(__name__, component="ingest")
 _DEFAULT_PACKAGE_NAME = "default"
 
 
-async def ensure_default_session() -> uuid.UUID:
+async def ensure_default_session() -> tuple[uuid.UUID, uuid.UUID]:
     """
-    Return the UUID of an active global session, creating the default
-    package and session if neither exists yet.
+    Return ``(session_id, package_id)`` for an active global session,
+    creating the default package and session if neither exists yet.
+
+    Both UUIDs are needed by callers: ``session_id`` to attach event rows
+    to, ``package_id`` to scope the parameter rows that hold detector
+    config.
 
     Idempotent — safe to call on every boot.
     """
@@ -53,7 +57,7 @@ async def ensure_default_session() -> uuid.UUID:
 
         if active is not None:
             _log.info("session_resumed", session_id=str(active.session_id))
-            return active.session_id
+            return uuid.UUID(str(active.session_id)), package_id
 
         new_session = Session(
             scope=SessionScope.GLOBAL,
@@ -67,7 +71,7 @@ async def ensure_default_session() -> uuid.UUID:
             session_id=str(new_session.session_id),
             package_id=str(package_id),
         )
-        return new_session.session_id
+        return uuid.UUID(str(new_session.session_id)), package_id
 
 
 async def _ensure_default_package(session: AsyncSession) -> uuid.UUID:

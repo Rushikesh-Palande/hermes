@@ -84,6 +84,10 @@ class DetectionEngine:
         for key in to_drop:
             del self._detectors[key]
 
+    def device_ids(self) -> list[int]:
+        """All device IDs that currently have at least one cached detector."""
+        return list({key[0] for key in self._detectors})
+
     def _detector_for(
         self, device_id: int, sensor_id: int, event_type: EventType
     ) -> SensorDetector:

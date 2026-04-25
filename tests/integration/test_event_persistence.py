@@ -29,7 +29,7 @@ from hermes.detection.window_buffer import EventWindowBuffer
 @pytest.mark.db
 @pytest.mark.asyncio
 async def test_ensure_default_session_creates_package_and_session() -> None:
-    session_id = await ensure_default_session()
+    session_id, _ = await ensure_default_session()
     assert session_id is not None
 
     # Verify both rows landed.
@@ -50,9 +50,10 @@ async def test_ensure_default_session_creates_package_and_session() -> None:
 @pytest.mark.db
 @pytest.mark.asyncio
 async def test_ensure_default_session_is_idempotent() -> None:
-    first = await ensure_default_session()
-    second = await ensure_default_session()
-    assert first == second
+    first_session, first_pkg = await ensure_default_session()
+    second_session, second_pkg = await ensure_default_session()
+    assert first_session == second_session
+    assert first_pkg == second_pkg
 
 
 @pytest.mark.db
@@ -63,7 +64,7 @@ async def test_event_round_trip_writes_event_and_window() -> None:
     and matching event_window row land in the DB with consistent linkage.
     """
     # 1. Bootstrap session + a Device row (events.device_id has a NOT NULL FK).
-    session_id = await ensure_default_session()
+    session_id, _ = await ensure_default_session()
     device_id = 1
     async with async_session() as session:
         from hermes.db.models import Device
