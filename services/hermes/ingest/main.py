@@ -180,7 +180,7 @@ class IngestPipeline:
         self._settings = settings
         self.live_data = LiveDataHub(maxlen=settings.live_buffer_max_samples)
         self.window_buffer = EventWindowBuffer()
-        self._offsets = OffsetCache()
+        self.offset_cache = OffsetCache()
         self._clocks = ClockRegistry(drift_threshold_s=settings.mqtt_drift_threshold_s)
 
         sink: EventSink
@@ -214,7 +214,7 @@ class IngestPipeline:
     async def start(self) -> None:
         """Connect to MQTT, load offsets, start writer + consumer tasks."""
         try:
-            await _load_sensor_offsets(self._offsets)
+            await _load_sensor_offsets(self.offset_cache)
         except Exception:
             log.warning("offset_load_failed_continuing", exc_info=True)
 
@@ -276,7 +276,7 @@ class IngestPipeline:
             _consume(
                 self._queue,
                 self._clocks,
-                self._offsets,
+                self.offset_cache,
                 self.live_data,
                 self.window_buffer,
                 self.detection_engine,
