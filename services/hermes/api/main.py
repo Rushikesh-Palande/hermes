@@ -50,6 +50,9 @@ from hermes.api.routes import (
     live_stream,
     offsets,
 )
+from hermes.api.routes import (
+    metrics as metrics_route,
+)
 from hermes.config import get_settings
 from hermes.db.engine import dispose_engine
 from hermes.detection.db_config import DbConfigProvider
@@ -144,5 +147,8 @@ def create_app() -> FastAPI:
     # Live SSE telemetry feed. Public for now; will move behind auth in
     # Phase 4 (auth polish) once the JWT flow is wired through the UI.
     app.include_router(live_stream.router, prefix="/api/live_stream", tags=["live"])
+
+    # Prometheus scrape. Unauthenticated — firewall / nginx in front.
+    app.include_router(metrics_route.router, prefix="/api/metrics", tags=["metrics"])
 
     return app

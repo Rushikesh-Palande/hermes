@@ -68,6 +68,7 @@ markers = [
   "slow: marks tests as slow (deselect with -m 'not slow')",
   "db: integration tests that hit a real Postgres",
   "mqtt: tests that require a Mosquitto broker",
+  "bench: synthetic-load throughput benchmark (deselected by default)",
 ]
 
 [tool.ruff]

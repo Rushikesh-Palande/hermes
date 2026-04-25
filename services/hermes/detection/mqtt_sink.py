@@ -27,6 +27,7 @@ import json
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from hermes import metrics as _m
 from hermes.detection.types import DetectedEvent
 from hermes.logging import get_logger
 
@@ -92,3 +93,5 @@ class MqttEventSink:
                 topic=topic,
                 rc=info.rc,
             )
+            return
+        _m.EVENTS_PUBLISHED_TOTAL.labels(event_type=event.event_type.value).inc()
