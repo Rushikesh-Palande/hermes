@@ -8,6 +8,28 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.9] — 2026-04-25
+
+### Added
+
+- **Streaming event export (Phase 5d)**: `GET /api/events/export` with
+  `?format=csv|ndjson` and the same filter shape as the list endpoint
+  (`device_id`, `sensor_id`, `event_type`, `after`, `before`). Pages
+  through matches in chunks of 1 000 with a fresh DB session per chunk
+  so an export never holds a pool connection for its whole duration.
+  Hard-capped at 1 000 000 rows; slice by time for larger pulls. CSV
+  has a stable, append-only column order; NDJSON emits one
+  `EventOut`-shaped record per line.
+- "Export CSV" / "Export NDJSON" buttons in the Events page header
+  that build the download URL off the current filter state — the
+  browser's `Content-Disposition: attachment` handling does the rest.
+
+### Changed
+
+- The events filter predicate is now factored into
+  `_filtered_events_query()` shared by list + export so the two can
+  never drift.
+
 ## [0.1.0-alpha.8] — 2026-04-25
 
 ### Added
@@ -255,7 +277,8 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
   CODE_OF_CONDUCT, CODEOWNERS, issue and PR templates, Dependabot config,
   `.gitignore`, `.gitattributes`, `.editorconfig`.
 
-[Unreleased]:     https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.8...HEAD
+[Unreleased]:     https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.9...HEAD
+[0.1.0-alpha.9]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.8...v0.1.0-alpha.9
 [0.1.0-alpha.8]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.7...v0.1.0-alpha.8
 [0.1.0-alpha.7]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.6...v0.1.0-alpha.7
 [0.1.0-alpha.6]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.5...v0.1.0-alpha.6
