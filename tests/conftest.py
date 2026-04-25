@@ -38,6 +38,10 @@ def _load_env_defaults() -> Iterator[None]:
         "MIGRATE_DATABASE_URL": "postgresql://hermes_migrate:test@localhost:5432/hermes_test",
         "HERMES_JWT_SECRET": "x" * 64,
         "HERMES_LOG_FORMAT": "console",
+        # Enables the dev-mode auth bypass in `get_current_user` so
+        # CurrentUser-protected routes don't need a JWT in tests. The
+        # real flow lands in Phase 3.5.
+        "HERMES_DEV_MODE": "1",
     }
     for key, value in defaults.items():
         os.environ.setdefault(key, value)
