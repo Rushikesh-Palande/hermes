@@ -67,15 +67,11 @@ async def test_put_device_override_round_trips(api_client: AsyncClient) -> None:
 async def test_put_sensor_override_round_trips(api_client: AsyncClient) -> None:
     await _seed_device(1)
     payload = _full_type_a(threshold_cv=2.5, t1=0.5)
-    resp = await api_client.put(
-        "/api/config/type_a/overrides/sensor/1/3", json=payload
-    )
+    resp = await api_client.put("/api/config/type_a/overrides/sensor/1/3", json=payload)
     assert resp.status_code == 200
 
     listing = (await api_client.get("/api/config/type_a/overrides")).json()
-    assert listing["sensors"] == [
-        {"device_id": 1, "sensor_id": 3, "config": payload}
-    ]
+    assert listing["sensors"] == [{"device_id": 1, "sensor_id": 3, "config": payload}]
 
 
 @pytest.mark.db
@@ -108,9 +104,7 @@ async def test_delete_sensor_override_returns_204_then_404(
     api_client: AsyncClient,
 ) -> None:
     await _seed_device(1)
-    await api_client.put(
-        "/api/config/type_a/overrides/sensor/1/5", json=_full_type_a()
-    )
+    await api_client.put("/api/config/type_a/overrides/sensor/1/5", json=_full_type_a())
     first = await api_client.delete("/api/config/type_a/overrides/sensor/1/5")
     assert first.status_code == 204
     assert (await api_client.delete("/api/config/type_a/overrides/sensor/1/5")).status_code == 404
