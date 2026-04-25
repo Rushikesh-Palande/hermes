@@ -93,6 +93,7 @@ from hermes.detection.types import EventSink
 from hermes.detection.window_buffer import EventWindowBuffer
 from hermes.ingest.clock import ClockRegistry
 from hermes.ingest.live_data import LiveDataHub
+from hermes.ingest.modbus import ModbusManager
 from hermes.ingest.offsets import OffsetCache
 from hermes.ingest.parser import parse_stm32_adc_payload
 from hermes.ingest.session_samples import SessionSampleWriter
@@ -285,6 +286,11 @@ class IngestPipeline:
         self.offset_cache = OffsetCache()
         self._clocks = ClockRegistry(drift_threshold_s=settings.mqtt_drift_threshold_s)
 
+        # In live_only mode (multi-shard API process), we run no detection
+        # and own no sinks — purpose is purely to keep the live ring
+        # buffer warm for SSE. Detection shards do that work.
+        run_detection = self._mode != "live_only"
+
         # Continuous-sample writer (gap 6). Created unconditionally so
         # the hot path doesn't need a None-check; ``push_snapshot`` is
         # a fast no-op when no session has ``record_raw_samples=true``.
@@ -292,13 +298,17 @@ class IngestPipeline:
         # construction stays cheap and synchronous. live_only mode
         # (multi-shard API) skips it — detection shards own this path.
         self.session_sample_writer: SessionSampleWriter | None = None
-        if settings.hermes_ingest_mode != "live_only":
+        if run_detection:
             self.session_sample_writer = SessionSampleWriter(dsn=settings.migrate_database_url)
 
-        # In live_only mode (multi-shard API process), we run no detection
-        # and own no sinks — purpose is purely to keep the live ring
-        # buffer warm for SSE. Detection shards do that work.
-        run_detection = self._mode != "live_only"
+        # Modbus TCP poller manager (gap 7). Created in any mode that
+        # runs detection; if no devices have ``protocol=modbus_tcp`` the
+        # manager just idles between refresh ticks. live_only mode
+        # skips it because polled snapshots have nowhere to land
+        # without detection.
+        self.modbus_manager: ModbusManager | None = None
+        if run_detection:
+            self.modbus_manager = ModbusManager(callback=self._on_modbus_snapshot)
 
         # Sinks: events fan out to (a) DB persistence and (b) outbound
         # MQTT topic, in that order. Use MultiplexEventSink so an outage
@@ -358,6 +368,45 @@ class IngestPipeline:
         self._consumer_task: asyncio.Task[None] | None = None
         self._client: mqtt.Client | None = None
 
+    def _on_modbus_snapshot(
+        self, device_id: int, ts: float, sensor_values: dict[int, float]
+    ) -> None:
+        """Downstream callback for ``ModbusPoller``.
+
+        Modbus snapshots take the same downstream path as MQTT
+        snapshots — offset correction, live + window buffers,
+        detection, sample writer — but skip the parts unique to MQTT
+        (JSON parse, STM32 clock anchoring). Local poll time IS the
+        wall clock for Modbus, so we use ``ts`` as-is.
+
+        Called from the asyncio event loop only; safe to mutate the
+        same buffers as ``_consume`` because they're single-threaded
+        within the loop.
+        """
+        # Offset correction (per-sensor calibration applies to either source).
+        sensor_values = self.offset_cache.apply(device_id, sensor_values)
+
+        # Live + window buffers — same writes as the MQTT path.
+        self.live_data.push(device_id, ts, sensor_values)
+        self.window_buffer.push_snapshot(device_id, ts, sensor_values)
+
+        # Counter ticks: count each Modbus reading the same way an MQTT
+        # one is counted, so Grafana sums work uniformly.
+        device_label = str(device_id)
+        _m.MSGS_RECEIVED_TOTAL.labels(device_id=device_label).inc()
+        _m.SAMPLES_PROCESSED_TOTAL.labels(device_id=device_label).inc(len(sensor_values))
+
+        # Detection. None in live_only mode (Modbus manager isn't
+        # constructed there, so we should never hit this branch with
+        # detection_engine == None — guard anyway).
+        if self.detection_engine is not None:
+            self.detection_engine.feed_snapshot(device_id, ts, sensor_values)
+
+        # Continuous-sample writer (gap 6). Same fast no-op when no
+        # session is recording.
+        if self.session_sample_writer is not None:
+            self.session_sample_writer.push_snapshot(device_id, ts, sensor_values)
+
     async def start(self) -> None:
         """Connect to MQTT, load offsets, start writer + consumer tasks."""
         try:
@@ -376,6 +425,15 @@ class IngestPipeline:
                 await self.session_sample_writer.start()
             except Exception:
                 log.exception("session_samples_writer_start_failed")
+
+        # Modbus poller manager (gap 7). Best-effort: a query failure
+        # here means we miss the initial discovery; the refresh loop
+        # will pick up devices on the next cycle.
+        if self.modbus_manager is not None:
+            try:
+                await self.modbus_manager.start()
+            except Exception:
+                log.exception("modbus_manager_start_failed")
 
         log.info(
             "ingest_starting",
@@ -465,6 +523,14 @@ class IngestPipeline:
         """Signal the consumer, drain the queue, disconnect MQTT, stop the writer."""
         log.info("ingest_stopping")
         self._stop_event.set()
+        # Stop the Modbus manager BEFORE the consumer drains so no new
+        # snapshots arrive into a torn-down detection engine. Pollers
+        # cancel their own tasks and close their TCP clients.
+        if self.modbus_manager is not None:
+            try:
+                await self.modbus_manager.stop()
+            except Exception:
+                log.exception("modbus_manager_stop_failed")
         if self._consumer_task is not None:
             await self._consumer_task
         # Force-forward any TTL-held events so a graceful shutdown
