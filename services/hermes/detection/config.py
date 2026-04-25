@@ -86,6 +86,39 @@ class TypeCConfig:
     expected_sample_rate_hz: float = 100.0
 
 
+@dataclass(frozen=True, slots=True)
+class TypeDConfig:
+    """
+    Type D (two-stage averaging on avg_T5) detector configuration.
+
+    Hierarchical baselines (legacy parity, contract §6):
+
+        Stage 1: avg_T4 = rolling mean of raw samples over last T4 s.
+        Stage 2: each elapsed wall-clock second, average the avg_T4 values
+                 falling in that second; append to one_sec_averages.
+        Stage 3: avg_T5 = mean of the last T5 entries of one_sec_averages.
+
+    Fires when ``avg_T3`` (from the paired Type C detector) leaves a
+    SYMMETRIC band around avg_T5:
+
+        lower = avg_T5 - (REF_VALUE × tolerance_pct) / 100
+        upper = avg_T5 + (REF_VALUE × tolerance_pct) / 100
+        fire when avg_T3 < lower OR avg_T3 > upper
+
+    Legacy quirk preserved: tolerance is single-valued (symmetric) even
+    though the legacy DB stored distinct upper/lower fields. Use
+    ``tolerance_pct`` for both sides.
+    """
+
+    enabled: bool = False
+    T4: float = 10.0
+    T5: float = 30.0
+    tolerance_pct: float = 5.0
+    debounce_seconds: float = 0.0
+    init_fill_ratio: float = 0.9
+    expected_sample_rate_hz: float = 100.0
+
+
 class DetectorConfigProvider(Protocol):
     """
     Resolves per-sensor detector config.
@@ -99,6 +132,7 @@ class DetectorConfigProvider(Protocol):
     def type_a_for(self, device_id: int, sensor_id: int) -> TypeAConfig: ...
     def type_b_for(self, device_id: int, sensor_id: int) -> TypeBConfig: ...
     def type_c_for(self, device_id: int, sensor_id: int) -> TypeCConfig: ...
+    def type_d_for(self, device_id: int, sensor_id: int) -> TypeDConfig: ...
 
 
 class StaticConfigProvider:
@@ -115,10 +149,12 @@ class StaticConfigProvider:
         type_a: TypeAConfig | None = None,
         type_b: TypeBConfig | None = None,
         type_c: TypeCConfig | None = None,
+        type_d: TypeDConfig | None = None,
     ) -> None:
         self._type_a = type_a if type_a is not None else TypeAConfig()
         self._type_b = type_b if type_b is not None else TypeBConfig()
         self._type_c = type_c if type_c is not None else TypeCConfig()
+        self._type_d = type_d if type_d is not None else TypeDConfig()
 
     def type_a_for(self, device_id: int, sensor_id: int) -> TypeAConfig:
         del device_id, sensor_id
@@ -131,3 +167,7 @@ class StaticConfigProvider:
     def type_c_for(self, device_id: int, sensor_id: int) -> TypeCConfig:
         del device_id, sensor_id
         return self._type_c
+
+    def type_d_for(self, device_id: int, sensor_id: int) -> TypeDConfig:
+        del device_id, sensor_id
+        return self._type_d
