@@ -29,17 +29,35 @@
 	let expandedWindow = $state<EventWindowOut | null>(null);
 	let expandedError = $state<string | null>(null);
 
-	function buildQueryString(): string {
-		const params = new URLSearchParams();
+	function appendFilters(params: URLSearchParams): void {
 		if (filterDeviceId !== null) params.set('device_id', String(filterDeviceId));
 		if (filterSensorId !== null) params.set('sensor_id', String(filterSensorId));
 		if (filterEventType) params.set('event_type', filterEventType);
 		if (filterAfter) params.set('after', new Date(filterAfter).toISOString());
 		if (filterBefore) params.set('before', new Date(filterBefore).toISOString());
+	}
+
+	function buildQueryString(): string {
+		const params = new URLSearchParams();
+		appendFilters(params);
 		params.set('limit', String(limit));
 		params.set('offset', String(offset));
 		return params.toString();
 	}
+
+	const exportCsvHref = $derived.by(() => {
+		const params = new URLSearchParams();
+		appendFilters(params);
+		params.set('format', 'csv');
+		return `/api/events/export?${params.toString()}`;
+	});
+
+	const exportNdjsonHref = $derived.by(() => {
+		const params = new URLSearchParams();
+		appendFilters(params);
+		params.set('format', 'ndjson');
+		return `/api/events/export?${params.toString()}`;
+	});
 
 	async function loadEvents() {
 		isLoading = true;
@@ -103,11 +121,29 @@
 	<title>HERMES · Events</title>
 </svelte:head>
 
-<header class="mb-6">
-	<h1 class="text-2xl font-semibold tracking-tight">Events</h1>
-	<p class="mt-1 text-sm text-neutral-500">
-		Detected events with their ±9 s sample windows. Newest first.
-	</p>
+<header class="mb-6 flex items-baseline justify-between gap-4">
+	<div>
+		<h1 class="text-2xl font-semibold tracking-tight">Events</h1>
+		<p class="mt-1 text-sm text-neutral-500">
+			Detected events with their ±9 s sample windows. Newest first.
+		</p>
+	</div>
+	<div class="flex gap-2 text-sm">
+		<a
+			href={exportCsvHref}
+			class="rounded-md border border-neutral-300 px-3 py-1.5 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+			title="Download CSV with current filters (limit/offset ignored)"
+		>
+			Export CSV
+		</a>
+		<a
+			href={exportNdjsonHref}
+			class="rounded-md border border-neutral-300 px-3 py-1.5 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+			title="Download NDJSON with current filters (limit/offset ignored)"
+		>
+			Export NDJSON
+		</a>
+	</div>
 </header>
 
 <form
