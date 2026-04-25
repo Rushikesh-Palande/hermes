@@ -8,6 +8,29 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.24] — 2026-04-26
+
+### Fixed
+
+- **CI: golden tests no longer fail with `JSONDecodeError`** on
+  ubuntu-24.04. The `.gitattributes` rule
+  `tests/golden/**/*.ndjson  filter=lfs ...` was tracking even the
+  small (kB-sized) synthetic corpora and baselines via Git LFS;
+  CI checks out without `git lfs pull`, so the test harness saw
+  the LFS pointer text instead of the JSON. Narrowed the LFS rule
+  to `tests/golden/captures/**` so only future real-hardware
+  captures (~30 MB compressed each per `GOLDEN_TRAFFIC_PLAN.md`
+  §1.2) take the LFS hop. The 5 existing files were re-checked-in
+  as plain text via `git add --renormalize`.
+
+### Docs
+
+- **`docs/design/ARCHITECTURE.md`** — the test-tier table had the
+  golden row marked "(planned)"; updated to reflect alpha.23 ship
+  status.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
 ## [0.1.0-alpha.23] — 2026-04-26
 
 ### Golden-traffic harness — gap 9
