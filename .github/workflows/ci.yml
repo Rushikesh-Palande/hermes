@@ -85,10 +85,13 @@ jobs:
         run: uv run mypy services/hermes
 
       - name: pytest (unit)
-        run: uv run pytest -m 'not db and not mqtt' --cov=services/hermes --cov-report=xml
+        run: uv run pytest -m 'not db and not mqtt and not bench' --cov=services/hermes --cov-report=xml
 
       - name: pytest (integration)
         run: uv run pytest -m db
+
+      - name: pytest (bench — throughput regression gate)
+        run: uv run pytest -m bench -s
 
   ui:
     name: UI typecheck + lint

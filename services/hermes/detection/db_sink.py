@@ -39,6 +39,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import update
 
+from hermes import metrics as _m
 from hermes.db.engine import async_session
 from hermes.db.models import Event, EventWindow
 from hermes.detection.encoding import encode_window
@@ -85,6 +86,7 @@ class DbEventSink:
         """Sync entry point — never blocks. Drops on full queue (unbounded by default)."""
         try:
             self._queue.put_nowait(event)
+            _m.DB_WRITER_PENDING.set(self._queue.qsize())
         except asyncio.QueueFull:
             _log.warning(
                 "event_queue_full_dropped",
@@ -177,6 +179,8 @@ class DbEventSink:
                 .values(window_id=window_row.window_id)
             )
 
+        _m.EVENTS_PERSISTED_TOTAL.labels(event_type=event.event_type.value).inc()
+        _m.DB_WRITER_PENDING.set(self._queue.qsize())
         _log.info(
             "event_persisted",
             event_id=event_row.event_id,
