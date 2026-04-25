@@ -66,6 +66,7 @@ from hermes.detection.engine import DetectionEngine
 from hermes.detection.mqtt_sink import MqttEventSink
 from hermes.detection.session import ensure_default_session
 from hermes.detection.sink import LoggingEventSink, MultiplexEventSink
+from hermes.detection.ttl_gate import TtlGateSink
 from hermes.detection.types import EventSink
 from hermes.detection.window_buffer import EventWindowBuffer
 from hermes.ingest.clock import ClockRegistry
@@ -234,9 +235,20 @@ class IngestPipeline:
         # lifespan swaps in a DbConfigProvider once a session exists.
         if config_provider is None:
             config_provider = StaticConfigProvider(TypeAConfig(enabled=False))
+
+        # TTL gate sits between the detector and the durable sinks.
+        # Bursts of same-type events on the same sensor collapse to one
+        # forwarded event; lower-priority types are blocked while a
+        # higher-priority is armed; BREAK bypasses entirely. The gate
+        # also exposes a flush() called on shutdown so we don't lose
+        # held events.
+        self.ttl_gate = TtlGateSink(
+            child=MultiplexEventSink(sinks),
+            ttl_seconds=settings.event_ttl_seconds,
+        )
         self.detection_engine = DetectionEngine(
             config_provider=config_provider,
-            sink=MultiplexEventSink(sinks),
+            sink=self.ttl_gate,
         )
         self._stop_event = asyncio.Event()
         self._queue: asyncio.Queue[tuple[bytes, float]] = asyncio.Queue()
@@ -331,6 +343,10 @@ class IngestPipeline:
         self._stop_event.set()
         if self._consumer_task is not None:
             await self._consumer_task
+        # Force-forward any TTL-held events so a graceful shutdown
+        # doesn't silently drop a burst that was still inside the
+        # 5 s dedup window.
+        self.ttl_gate.flush()
         # Drop the client reference on the outbound sink BEFORE
         # disconnecting paho — any event still in flight will skip the
         # publish (logged warn) instead of racing a torn-down client.
