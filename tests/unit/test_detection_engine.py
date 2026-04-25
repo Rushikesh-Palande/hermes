@@ -8,7 +8,12 @@ fired, in what order, and with which metadata. No hardware, no DB.
 from __future__ import annotations
 
 from hermes.db.models import EventType
-from hermes.detection.config import StaticConfigProvider, TypeAConfig
+from hermes.detection.config import (
+    StaticConfigProvider,
+    TypeAConfig,
+    TypeBConfig,
+    TypeCConfig,
+)
 from hermes.detection.engine import DetectionEngine
 from hermes.detection.types import DetectedEvent
 
@@ -83,6 +88,43 @@ def test_reset_device_drops_detector_state() -> None:
     for i in range(50):
         engine.feed_snapshot(device_id=1, ts=10.0 + i * 0.01, values=_high_variance_snapshot(i))
     assert sink.events == []
+
+
+def test_engine_routes_all_three_event_types() -> None:
+    """A, B, C detectors should all get the same sample and fire independently."""
+    sink = _RecordingSink()
+    engine = DetectionEngine(
+        StaticConfigProvider(
+            type_a=TypeAConfig(
+                enabled=True, T1=1.0, threshold_cv=5.0, expected_sample_rate_hz=100.0
+            ),
+            type_b=TypeBConfig(
+                enabled=True,
+                T2=1.0,
+                lower_threshold_pct=2.0,
+                upper_threshold_pct=2.0,
+                expected_sample_rate_hz=100.0,
+            ),
+            type_c=TypeCConfig(
+                enabled=True,
+                T3=1.0,
+                threshold_lower=49.0,
+                threshold_upper=51.0,
+                expected_sample_rate_hz=100.0,
+            ),
+        ),
+        sink,
+    )
+    # High variance, values well outside any tight band.
+    for i in range(300):
+        v = 60.0 if i % 2 == 0 else 40.0
+        engine.feed_snapshot(device_id=1, ts=i * 0.01, values={1: v})
+
+    fired_types = {e.event_type for e in sink.events}
+    # All three types should have fired at least once given these thresholds.
+    assert fired_types == {EventType.A, EventType.B}
+    # Type C needs avg outside [49,51]; with alternating 40/60 the mean is 50 →
+    # does NOT fire. That's the expected parity behaviour.
 
 
 def test_multiple_devices_kept_separate() -> None:

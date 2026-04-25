@@ -37,12 +37,52 @@ class TypeAConfig:
     T1: float = 1.0
     threshold_cv: float = 5.0
     debounce_seconds: float = 0.0
-    # When window_count reaches this fraction of `T1 × expected_rate`,
-    # the detector flips to "warm" and starts emitting events. Legacy
-    # hardcodes 0.9 for Type A.
     init_fill_ratio: float = 0.9
-    # Used only for buffer sizing and the init-fill threshold — the
-    # window itself slides on real timestamps, not sample count.
+    expected_sample_rate_hz: float = 100.0
+
+
+@dataclass(frozen=True, slots=True)
+class TypeBConfig:
+    """
+    Type B (post-window deviation) detector configuration.
+
+    Fires when the latest sample falls outside a tolerance band centred
+    on the T2-second rolling mean:
+
+        lower = avg_T2 − (REF_VALUE × lower_threshold_pct) / 100
+        upper = avg_T2 + (REF_VALUE × upper_threshold_pct) / 100
+        fire when value < lower OR value > upper
+
+    Tolerance percentages are asymmetric (upper and lower can differ).
+    """
+
+    enabled: bool = False
+    T2: float = 5.0
+    lower_threshold_pct: float = 5.0
+    upper_threshold_pct: float = 5.0
+    debounce_seconds: float = 0.0
+    init_fill_ratio: float = 0.9
+    expected_sample_rate_hz: float = 100.0
+
+
+@dataclass(frozen=True, slots=True)
+class TypeCConfig:
+    """
+    Type C (range-based on avg_T3) detector configuration.
+
+    Fires when the T3-second rolling mean itself leaves absolute bounds:
+
+        fire when avg_T3 < threshold_lower OR avg_T3 > threshold_upper
+
+    Thresholds are raw sensor units, not percentages.
+    """
+
+    enabled: bool = False
+    T3: float = 10.0
+    threshold_lower: float = 0.0
+    threshold_upper: float = 100.0
+    debounce_seconds: float = 0.0
+    init_fill_ratio: float = 0.9
     expected_sample_rate_hz: float = 100.0
 
 
@@ -50,27 +90,44 @@ class DetectorConfigProvider(Protocol):
     """
     Resolves per-sensor detector config.
 
-    The engine calls ``type_a_for(device_id, sensor_id)`` lazily on the
-    first sample for that sensor, caches the result, and creates the
-    detector. ``invalidate()`` (future) will be called from the config
-    API after the operator saves a new threshold.
+    The engine calls the appropriate ``type_X_for`` lazily on the first
+    sample for that sensor, caches the result, and creates the detector.
+    ``invalidate()`` (future) will be called from the config API after
+    the operator saves a new threshold.
     """
 
     def type_a_for(self, device_id: int, sensor_id: int) -> TypeAConfig: ...
+    def type_b_for(self, device_id: int, sensor_id: int) -> TypeBConfig: ...
+    def type_c_for(self, device_id: int, sensor_id: int) -> TypeCConfig: ...
 
 
 class StaticConfigProvider:
     """
-    Returns a single ``TypeAConfig`` regardless of device or sensor.
+    Returns a single config per event type, regardless of device or sensor.
 
-    Used in tests and as the Phase 3b stand-in before the DB-backed
+    Used in tests and as the Phase 3b/c stand-in before the DB-backed
     provider lands. Safe to share across the entire engine because the
-    dataclass is frozen.
+    dataclasses are frozen.
     """
 
-    def __init__(self, type_a: TypeAConfig) -> None:
-        self._type_a = type_a
+    def __init__(
+        self,
+        type_a: TypeAConfig | None = None,
+        type_b: TypeBConfig | None = None,
+        type_c: TypeCConfig | None = None,
+    ) -> None:
+        self._type_a = type_a if type_a is not None else TypeAConfig()
+        self._type_b = type_b if type_b is not None else TypeBConfig()
+        self._type_c = type_c if type_c is not None else TypeCConfig()
 
     def type_a_for(self, device_id: int, sensor_id: int) -> TypeAConfig:
         del device_id, sensor_id
         return self._type_a
+
+    def type_b_for(self, device_id: int, sensor_id: int) -> TypeBConfig:
+        del device_id, sensor_id
+        return self._type_b
+
+    def type_c_for(self, device_id: int, sensor_id: int) -> TypeCConfig:
+        del device_id, sensor_id
+        return self._type_c
