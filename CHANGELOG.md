@@ -8,6 +8,42 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.7] — 2026-04-25
+
+### Fixed
+
+- **SQLAlchemy enum / Postgres enum case mismatch.** Postgres ENUMs
+  defined in `0002_core_tables.sql` use lowercase string values
+  (`'global'`, `'mqtt'`, …) but SQLAlchemy was sending Python enum
+  member NAMES (`'GLOBAL'`, `'MQTT'`). Every insert and select against
+  `session_scope`, `parameter_scope`, `session_log_event`, and
+  `device_protocol` failed with `invalid input value for enum`. Wired a
+  `_pg_enum()` helper in [`db/models.py`](services/hermes/db/models.py)
+  that supplies `values_callable` so SA sends the StrEnum's `.value`.
+  All five `Enum()` columns now route through it. (`event_type`
+  happened to work because `A`/`B`/`C`/`D`/`BREAK` have name == value.)
+- **`/api/config` PUTs returning stale data.** The handlers called
+  `provider.reload()` from a freshly-opened session that couldn't see
+  the route's uncommitted INSERT/UPDATE. Replaced
+  `session.flush(); _hot_reload()` with a new `_commit_and_reload()`
+  helper that commits before the reload.
+- **Override PUTs returning 500 on bad payload.** Override handlers
+  take `dict[str, Any]` and validate manually, but Pydantic's
+  `ValidationError` raised inside the route body isn't
+  auto-converted to 422 (only at parameter-binding time). Added a
+  `_validate_or_422()` helper that re-raises as `HTTPException(422)`
+  with `include_context=False` so Pydantic's non-JSON-serialisable
+  `ctx.error` doesn't crash response serialisation.
+- **`test_filter_by_time_range`** now passes datetimes via httpx
+  `params=` so the `+` in the offset is URL-encoded; FastAPI was
+  decoding the literal `+` to a space and 422-ing.
+- **`_seed_event`** pins `fired_at = triggered_at` so the
+  `events_fire_vs_trigger` CHECK survives future-dated test
+  timestamps.
+- **`test_put_type_c_rejects_inverted_thresholds`** — Pydantic v2
+  `detail` is a list of error dicts, not a string; assert against the
+  message field.
+
 ## [0.1.0-alpha.6] — 2026-04-25
 
 ### Added
@@ -196,7 +232,8 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
   CODE_OF_CONDUCT, CODEOWNERS, issue and PR templates, Dependabot config,
   `.gitignore`, `.gitattributes`, `.editorconfig`.
 
-[Unreleased]:     https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.6...HEAD
+[Unreleased]:     https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.7...HEAD
+[0.1.0-alpha.7]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.6...v0.1.0-alpha.7
 [0.1.0-alpha.6]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.5...v0.1.0-alpha.6
 [0.1.0-alpha.5]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.4...v0.1.0-alpha.5
 [0.1.0-alpha.4]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.3...v0.1.0-alpha.4
