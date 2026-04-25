@@ -42,6 +42,28 @@ class Base(DeclarativeBase):
     """Common declarative base. No shared columns beyond what SA adds."""
 
 
+def _pg_enum(py_enum: type[enum.Enum], *, name: str) -> Enum:
+    """
+    Build a SQLAlchemy ``Enum`` column type that round-trips against the
+    Postgres enum created in ``0002_core_tables.sql``.
+
+    Why ``values_callable``: by default SQLAlchemy sends the Python enum
+    member's NAME (``GLOBAL``) over the wire, but our DDL declared the
+    Postgres enum with LOWERCASE values (``'global'``). Without this
+    bridge every insert/select against scope or protocol fails with
+    ``invalid input value for enum: "GLOBAL"``. Use the StrEnum's
+    ``.value`` instead.
+
+    ``native_enum=True`` (default) keeps the Postgres-side enum type;
+    we don't fall back to a CHECK-constrained TEXT column.
+    """
+    return Enum(
+        py_enum,
+        name=name,
+        values_callable=lambda x: [e.value for e in x],
+    )
+
+
 # ─── Enums (match CREATE TYPE in 0002_core_tables.sql) ─────────────
 
 
@@ -92,7 +114,7 @@ class Device(Base):
     device_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     protocol: Mapped[DeviceProtocol] = mapped_column(
-        Enum(DeviceProtocol, name="device_protocol"),
+        _pg_enum(DeviceProtocol, name="device_protocol"),
         nullable=False,
         default=DeviceProtocol.MQTT,
     )
@@ -159,7 +181,7 @@ class Parameter(Base):
         nullable=False,
     )
     scope: Mapped[ParameterScope] = mapped_column(
-        Enum(ParameterScope, name="parameter_scope"), nullable=False
+        _pg_enum(ParameterScope, name="parameter_scope"), nullable=False
     )
     device_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("devices.device_id"))
     sensor_id: Mapped[int | None] = mapped_column(SmallInteger)
@@ -183,7 +205,7 @@ class Session(Base):
         server_default=func.gen_random_uuid(),
     )
     scope: Mapped[SessionScope] = mapped_column(
-        Enum(SessionScope, name="session_scope"), nullable=False
+        _pg_enum(SessionScope, name="session_scope"), nullable=False
     )
     parent_session_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("sessions.session_id")
@@ -214,7 +236,7 @@ class SessionLog(Base):
         nullable=False,
     )
     event: Mapped[SessionLogEvent] = mapped_column(
-        Enum(SessionLogEvent, name="session_log_event"), nullable=False
+        _pg_enum(SessionLogEvent, name="session_log_event"), nullable=False
     )
     ts: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -248,7 +270,7 @@ class Event(Base):
     device_id: Mapped[int] = mapped_column(Integer, ForeignKey("devices.device_id"), nullable=False)
     sensor_id: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     event_type: Mapped[EventType] = mapped_column(
-        Enum(EventType, name="event_type"), nullable=False
+        _pg_enum(EventType, name="event_type"), nullable=False
     )
     fired_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

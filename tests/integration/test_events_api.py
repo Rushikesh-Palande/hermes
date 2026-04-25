@@ -39,9 +39,14 @@ async def _seed_event(
 ) -> int:
     """Insert one Event (and optionally an EventWindow). Returns event_id."""
     async with async_session() as session:
+        # Pin fired_at == triggered_at so the events_fire_vs_trigger CHECK
+        # constraint (fired_at >= triggered_at - 1 minute) holds even when
+        # the test seeds a triggered_at well outside "now" (e.g. 2 hours
+        # in the future for the time-range filter test).
         ev = Event(
             session_id=session_id,
             triggered_at=triggered_at,
+            fired_at=triggered_at,
             device_id=device_id,
             sensor_id=sensor_id,
             event_type=event_type,
@@ -142,7 +147,9 @@ async def test_filter_by_time_range(api_client: AsyncClient) -> None:
 
     after = (base - timedelta(hours=1)).isoformat()
     before = (base + timedelta(hours=1)).isoformat()
-    resp = await api_client.get(f"/api/events?after={after}&before={before}")
+    # Use ``params=`` so httpx URL-encodes the ``+`` in the offset
+    # (otherwise FastAPI receives it as a literal space and 422s).
+    resp = await api_client.get("/api/events", params={"after": after, "before": before})
     assert resp.status_code == 200
     body = resp.json()
     assert [e["event_id"] for e in body] == [in_range]
