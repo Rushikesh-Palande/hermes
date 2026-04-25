@@ -23,6 +23,11 @@ dependencies = [
   "pyjwt>=2.10",
   # MQTT
   "paho-mqtt>=2.1",
+  # JSON — orjson is the production JSON path (3-5x faster than stdlib
+  # json on the 2 000 msg/s ingest hot path). Stdlib json is still used
+  # in non-hot-path code where the speed doesn't matter (e.g. test
+  # fixtures, ad-hoc tooling).
+  "orjson>=3.10",
   # Observability
   "structlog>=24.4",
   "prometheus-client>=0.21",

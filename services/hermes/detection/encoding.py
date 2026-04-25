@@ -14,7 +14,7 @@ when the default flips.
 
 from __future__ import annotations
 
-import json
+import orjson
 
 # String stored on ``event_windows.encoding`` for the format below.
 # When the production zstd+delta-f32 encoder lands, it'll use
@@ -30,9 +30,13 @@ def encode_window(samples: list[tuple[float, float]]) -> tuple[bytes, str]:
     matching ``encoding`` column verbatim. Choice of encoding lives
     in this module so the storage shape can evolve independently of
     the sink that calls it.
+
+    Output bytes are byte-identical to the prior stdlib-``json``
+    implementation: orjson emits the same compact ``{"ts":…,"v":…}``
+    shape with no whitespace and the same key order (insertion order).
     """
     payload = [{"ts": ts, "v": v} for ts, v in samples]
-    return json.dumps(payload, separators=(",", ":")).encode("utf-8"), ENCODING_JSON
+    return orjson.dumps(payload), ENCODING_JSON
 
 
 def decode_window(data: bytes, encoding: str) -> list[tuple[float, float]]:
@@ -42,5 +46,5 @@ def decode_window(data: bytes, encoding: str) -> list[tuple[float, float]]:
     """
     if encoding != ENCODING_JSON:
         raise ValueError(f"unsupported event-window encoding: {encoding!r}")
-    payload = json.loads(data)
+    payload = orjson.loads(data)
     return [(item["ts"], item["v"]) for item in payload]
