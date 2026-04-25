@@ -1,0 +1,16 @@
+# Aggregate target for HERMES services.
+#
+# ``systemctl start hermes.target`` brings up the API + ingest unit(s).
+# ``systemctl stop hermes.target`` shuts them down in dependency order.
+#
+# Using a target instead of a single multi-instance service lets ops
+# enable/disable shards independently without restarting the API.
+
+[Unit]
+Description=HERMES sensor dashboard
+Documentation=file:///opt/hermes/README.md
+Requires=hermes-api.service
+After=hermes-api.service
+
+[Install]
+WantedBy=multi-user.target

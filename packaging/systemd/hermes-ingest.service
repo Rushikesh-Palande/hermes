@@ -1,0 +1,41 @@
+# Single-process HERMES ingest unit (default deployment).
+#
+# Use this when ``HERMES_INGEST_MODE=all`` (the alpha.13 default). The
+# bench shows ~16 700 msg/s on a developer laptop and ~5 500 msg/s on
+# a Pi 4 — comfortably above the 2 000 msg/s production target, so a
+# single process is enough for most deployments.
+#
+# For multi-process safety/scaling, disable this unit and enable
+# ``hermes-ingest@0..N.service`` instead. The two are mutually
+# exclusive (both subscribe to ``stm32/adc``; running them together
+# would double-process every message).
+
+[Unit]
+Description=HERMES MQTT consumer + detection
+Documentation=file:///opt/hermes/docs/contracts/INGESTION_PIPELINE.md
+After=network-online.target postgresql.service mosquitto.service
+Wants=network-online.target
+PartOf=hermes.target
+Conflicts=hermes-ingest@.service
+
+[Service]
+Type=simple
+User=hermes
+Group=hermes
+WorkingDirectory=/opt/hermes
+EnvironmentFile=/etc/hermes/secrets.env
+EnvironmentFile=/etc/hermes/ingest.env
+Environment=HERMES_INGEST_MODE=all
+ExecStart=/opt/hermes/.venv/bin/hermes-ingest
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/log/hermes /var/lib/hermes
+MemoryHigh=400M
+MemoryMax=600M
+
+[Install]
+WantedBy=hermes.target

@@ -1,0 +1,40 @@
+# HERMES API systemd unit.
+#
+# Runs the FastAPI application under uvicorn. In single-process
+# deployments (``HERMES_INGEST_MODE=all`` on the ingest unit), this
+# process only serves HTTP and consumes the live ring buffer that
+# its embedded IngestPipeline keeps warm.
+#
+# In multi-shard deployments (``hermes-ingest@N.service`` enabled),
+# set ``HERMES_INGEST_MODE=live_only`` here. The API still subscribes
+# to MQTT but skips detection — that work runs in the shards. SSE
+# keeps working because the API owns the live ring buffer for ALL
+# devices; the shards own detection state for THEIR slice.
+
+[Unit]
+Description=HERMES API + UI server
+Documentation=file:///opt/hermes/docs/contracts/API_CONTRACT.md
+After=network-online.target postgresql.service mosquitto.service
+Wants=network-online.target
+PartOf=hermes.target
+
+[Service]
+Type=simple
+User=hermes
+Group=hermes
+WorkingDirectory=/opt/hermes
+EnvironmentFile=/etc/hermes/secrets.env
+EnvironmentFile=/etc/hermes/api.env
+ExecStart=/opt/hermes/.venv/bin/hermes-api
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/log/hermes /var/lib/hermes
+MemoryHigh=400M
+MemoryMax=600M
+
+[Install]
+WantedBy=hermes.target
