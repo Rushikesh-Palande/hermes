@@ -44,11 +44,11 @@ Reconnection:
 from __future__ import annotations
 
 import asyncio
-import json
 import signal
 import time
 from typing import Any
 
+import orjson
 import paho.mqtt.client as mqtt
 from sqlalchemy import select
 
@@ -108,67 +108,91 @@ async def _consume(
     Drain the handoff queue and run the full ingestion pipeline.
 
     Runs until ``stop_event`` is set and the queue is empty.
+
+    Hot-path discipline (Layer 1 micro-opts):
+      * ``orjson.loads`` instead of stdlib ``json`` — 3-5x faster on
+        the small JSON envelopes STM32 emits.
+      * Metrics module references (``_m.X``) and a few hot helpers are
+        pre-bound to locals before the loop, dropping a global+attr
+        lookup per sample at 24 000 samples/s.
+      * No per-sample log. The ``MSGS_RECEIVED_TOTAL`` and
+        ``SAMPLES_PROCESSED_TOTAL`` counters cover the same ground for
+        debugging without paying structlog formatting overhead 24 000
+        times a second. Errors and warnings still log fully.
+      * ``time_stage`` context managers stay — they're sampled (1 in
+        100 by default) so the steady-state cost is negligible, and
+        we'd be flying blind without them.
     """
+    # Pre-bind hot path attribute lookups to locals. CPython's LOAD_FAST
+    # is several times cheaper than LOAD_GLOBAL+LOAD_ATTR; at 2 000 msg/s
+    # this saves ~5-8 ms/s of pure interpreter overhead.
+    queue_get = queue.get
+    queue_qsize = queue.qsize
+    metrics_consume_qdepth = _m.CONSUME_QUEUE_DEPTH
+    metrics_msgs_invalid = _m.MSGS_INVALID_TOTAL
+    metrics_msgs_received = _m.MSGS_RECEIVED_TOTAL
+    metrics_samples_processed = _m.SAMPLES_PROCESSED_TOTAL
+    metrics_time_stage = _m.time_stage
+    orjson_loads = orjson.loads
+    parse_payload = parse_stm32_adc_payload
+    clocks_anchor = clocks.anchor
+    offsets_apply = offsets.apply
+    live_push = live.push
+    window_push = window_buffer.push_snapshot
+    detect_feed = detection.feed_snapshot
+
     while not stop_event.is_set() or not queue.empty():
         try:
-            raw_bytes, receive_ts = await asyncio.wait_for(queue.get(), timeout=0.1)
+            raw_bytes, receive_ts = await asyncio.wait_for(queue_get(), timeout=0.1)
         except TimeoutError:
             continue
 
-        # Update queue depth gauge after each successful dequeue. Cheap;
-        # ``qsize`` is O(1) on asyncio.Queue.
-        _m.CONSUME_QUEUE_DEPTH.set(queue.qsize())
+        # Queue depth gauge: cheap O(1) read on asyncio.Queue.
+        metrics_consume_qdepth.set(queue_qsize())
 
         try:
-            with _m.time_stage("parse"):
-                payload: dict[str, Any] = json.loads(raw_bytes)
-        except json.JSONDecodeError:
-            _m.MSGS_INVALID_TOTAL.inc()
+            with metrics_time_stage("parse"):
+                payload: dict[str, Any] = orjson_loads(raw_bytes)
+        except orjson.JSONDecodeError:
+            metrics_msgs_invalid.inc()
             log.warning("mqtt_bad_json", size=len(raw_bytes))
             continue
 
         device_id: int = int(payload.get("device_id", 1))
         device_label = str(device_id)
-        _m.MSGS_RECEIVED_TOTAL.labels(device_id=device_label).inc()
+        metrics_msgs_received.labels(device_id=device_label).inc()
 
         # --- Timestamp anchoring ---
         dev_ts_ms = payload.get("ts")
-        with _m.time_stage("anchor"):
+        with metrics_time_stage("anchor"):
             if dev_ts_ms is not None:
-                ts = clocks.anchor(device_id, receive_ts, float(dev_ts_ms) / 1000.0)
+                ts = clocks_anchor(device_id, receive_ts, float(dev_ts_ms) / 1000.0)
             else:
                 ts = receive_ts
 
         # --- Parse ADC channels ---
-        with _m.time_stage("adc_parse"):
-            sensor_values = parse_stm32_adc_payload(payload)
+        with metrics_time_stage("adc_parse"):
+            sensor_values = parse_payload(payload)
         if not sensor_values:
             continue
 
         # --- Apply per-sensor calibration offsets ---
-        with _m.time_stage("offset"):
-            sensor_values = offsets.apply(device_id, sensor_values)
+        with metrics_time_stage("offset"):
+            sensor_values = offsets_apply(device_id, sensor_values)
 
         # --- Feed live ring buffer (SSE) and window buffer (event capture) ---
-        with _m.time_stage("buffers"):
-            live.push(device_id, ts, sensor_values)
-            window_buffer.push_snapshot(device_id, ts, sensor_values)
+        with metrics_time_stage("buffers"):
+            live_push(device_id, ts, sensor_values)
+            window_push(device_id, ts, sensor_values)
 
         # Counter ticks once per sensor reading actually fed into the
         # pipeline. Same labelling as MSGS_RECEIVED_TOTAL so a Grafana
         # join is straightforward.
-        _m.SAMPLES_PROCESSED_TOTAL.labels(device_id=device_label).inc(len(sensor_values))
+        metrics_samples_processed.labels(device_id=device_label).inc(len(sensor_values))
 
         # --- Feed detection engine ---
-        with _m.time_stage("detect"):
-            detection.feed_snapshot(device_id, ts, sensor_values)
-
-        log.debug(
-            "sample_ingested",
-            device_id=device_id,
-            ts=ts,
-            sensors=len(sensor_values),
-        )
+        with metrics_time_stage("detect"):
+            detect_feed(device_id, ts, sensor_values)
 
 
 class IngestPipeline:
