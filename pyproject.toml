@@ -1,6 +1,6 @@
 [project]
 name = "hermes"
-version = "0.1.0a26"
+version = "0.1.0a27"
 description = "HERMES sensor dashboard — industrial STM32 monitoring, detection engine, and operator UI."
 readme = "README.md"
 requires-python = ">=3.11"

@@ -8,6 +8,45 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.27] — 2026-04-25
+
+### Release-workflow hotfix
+
+The alpha.26 release pipeline failed: `build-deb` exited 3 on both
+amd64 and arm64 matrix entries, and `build-offline` exited 126.
+This release ships the fixes:
+
+- **Executable bit on packaging scripts.** `install.sh`,
+  `uninstall.sh`, `build-offline-bundle.sh`, `release-notes.sh`,
+  and `debian/{postinst,postrm,rules}` were committed as `100644`
+  in alpha.26 because they were created by tools that don't set the
+  +x bit. The workflow's `./packaging/build-offline-bundle.sh`
+  invocation got "command found but not executable" (exit 126).
+  Re-stored as `100755` via `git update-index --chmod=+x`.
+
+- **Disabled dh-python in `debian/rules`.** debhelper-13's `dh`
+  auto-detects `pyproject.toml` and tries to run `pybuild` against
+  hatchling at build time. The runner doesn't have hatchling
+  pre-installed and the build env is offline at that step, so
+  `dpkg-buildpackage` exited 3. Added `--without python3` to
+  the `dh` invocation so dh-python is skipped entirely — the
+  Python venv is built at install time on the target host
+  anyway, where it can pick up host-specific platform wheels.
+
+- **Architecture: all (single .deb instead of per-arch matrix).**
+  HERMES is pure Python source + a JS bundle — no native code
+  ships in the .deb, so one `_all.deb` works on amd64 and arm64.
+  This also removes the pretend "arm64" build matrix entry that
+  was actually building an amd64 .deb on the x64 runner. Workflow
+  drops from a 2-entry matrix to a single `build-deb` job; release
+  body and README updated to reference `hermes_<version>_all.deb`.
+
+- **Trimmed Build-Depends.** `dh-python` and `python3-all` removed
+  from `debian/control` Build-Depends since `--without python3`
+  means they're never invoked.
+
+No app code changes.
+
 ## [0.1.0-alpha.26] — 2026-04-26
 
 ### Production packaging — three install paths

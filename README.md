@@ -104,11 +104,12 @@ docker compose up -d
 
 ### Option 2 — Debian package (Pi 4 / Linux servers)
 
-Download the `.deb` for your architecture from
-[Releases](https://github.com/Rushikesh-Palande/hermes/releases/latest):
+Download the `.deb` from
+[Releases](https://github.com/Rushikesh-Palande/hermes/releases/latest)
+— one file works on amd64 and arm64:
 
 ```bash
-sudo dpkg -i hermes_<version>_amd64.deb
+sudo dpkg -i hermes_<version>_all.deb
 sudo apt install -f          # resolve declared dependencies
 ```
 
