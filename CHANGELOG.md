@@ -8,6 +8,33 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.5] — 2026-04-25
+
+### Added
+
+- **Live sensor graph (Phase 5a)**: new `$lib/LiveChart.svelte` opens an
+  `EventSource` on `/api/live_stream/{device_id}` and renders all 12
+  sensors in real time with uPlot. Step-end paths match the legacy
+  ECharts `step:'end'` look; hold-last-value on missing sensors prevents
+  the line from snapping to zero on transient gaps.
+- New device detail route at `/devices/[device_id]` with device
+  metadata, a 1 s / 6 s / 12 s window selector, per-sensor toggle chips,
+  and the embedded live chart.
+- Device list rows now link to the detail page; an explicit "Live"
+  action sits next to the existing enable/disable button.
+
+### Fixed
+
+- `migrations/0005_retention_policies.sql` removed the
+  `add_retention_policy('event_windows', …)` call. `event_windows` is
+  not a hypertable — Timescale's retention policy requires one — so
+  the call raised
+  `UnknownPostgresError: "event_windows" is not a hypertable or a
+  continuous aggregate` once the previous alpha.4 fix unblocked
+  migration-0005 from running cleanly. Cleanup of old window BLOBs is
+  deferred to application-level code; promoting `event_windows` to a
+  hypertable will need a composite-PK schema change.
+
 ## [0.1.0-alpha.4] — 2026-04-25
 
 ### Fixed
@@ -143,7 +170,8 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
   CODE_OF_CONDUCT, CODEOWNERS, issue and PR templates, Dependabot config,
   `.gitignore`, `.gitattributes`, `.editorconfig`.
 
-[Unreleased]:     https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.4...HEAD
+[Unreleased]:     https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.5...HEAD
+[0.1.0-alpha.5]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.4...v0.1.0-alpha.5
 [0.1.0-alpha.4]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.3...v0.1.0-alpha.4
 [0.1.0-alpha.3]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.2...v0.1.0-alpha.3
 [0.1.0-alpha.2]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
