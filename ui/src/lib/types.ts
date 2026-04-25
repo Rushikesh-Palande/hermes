@@ -158,3 +158,73 @@ export interface MqttBrokerPatch {
 	use_tls?: boolean;
 	is_active?: boolean;
 }
+
+// ─── Packages ─────────────────────────────────────────────────────
+
+export interface PackageOut {
+	package_id: string;
+	name: string;
+	description: string | null;
+	is_default: boolean;
+	is_locked: boolean;
+	created_at: string;
+	created_by: string | null;
+	archived_at: string | null;
+	parent_package_id: string | null;
+}
+
+export interface PackageIn {
+	name: string;
+	description?: string | null;
+}
+
+// ─── Sessions ─────────────────────────────────────────────────────
+
+export type SessionScope = 'global' | 'local';
+export type SessionLogEvent =
+	| 'start'
+	| 'stop'
+	| 'pause'
+	| 'resume'
+	| 'reconfigure'
+	| 'error';
+
+export interface SessionOut {
+	session_id: string;
+	scope: SessionScope;
+	parent_session_id: string | null;
+	device_id: number | null;
+	package_id: string;
+	started_at: string;
+	ended_at: string | null;
+	started_by: string | null;
+	ended_reason: string | null;
+	notes: string | null;
+	record_raw_samples: boolean;
+}
+
+export interface SessionStart {
+	scope: SessionScope;
+	package_id: string;
+	device_id?: number | null;
+	notes?: string | null;
+	record_raw_samples?: boolean;
+}
+
+export interface SessionStop {
+	ended_reason?: string | null;
+}
+
+export interface SessionLogOut {
+	log_id: number;
+	session_id: string;
+	event: SessionLogEvent;
+	ts: string;
+	actor: string | null;
+	details: Record<string, unknown> | null;
+}
+
+export interface CurrentSessionsOut {
+	global_session: SessionOut | null;
+	local_sessions: SessionOut[];
+}

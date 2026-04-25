@@ -328,6 +328,8 @@ Route modules live under `services/hermes/api/routes/`:
 | `offsets.py`       | `/api/devices/<id>/offsets` — calibration CRUD                         |
 | `config.py`        | `/api/config/*` — parameter CRUD with `_commit_and_reload` + `NOTIFY`  |
 | `mqtt_brokers.py`  | `/api/mqtt-brokers/*` — broker registry; one row active at a time      |
+| `packages.py`      | `/api/packages/*` — config-package CRUD + clone (parameter-row copy)   |
+| `sessions.py`      | `/api/sessions/*` — session lifecycle (start/stop), audit log, /current |
 | `live.py`          | `/api/live/sse` — Server-Sent Events from `LiveDataHub`                |
 | `metrics.py`       | `/api/metrics` — Prometheus text-format exposition                     |
 | `health.py`        | `/api/health` — basic liveness + DB ping                               |

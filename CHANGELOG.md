@@ -8,6 +8,100 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.19] — 2026-04-25
+
+### Operator UI — gap 5 (Sessions + Packages)
+
+Operator-driven session lifecycle. The DB schema, triggers, and partial
+unique indexes for sessions/packages have been in place since alpha.5;
+this release wires up the API and the UI so operators can actually
+start, stop, and audit sessions without going through the bootstrap
+helper.
+
+### Added
+
+- **`/api/sessions/*`** in `services/hermes/api/routes/sessions.py`:
+  - `GET /api/sessions` — list with optional filters
+    (`active=true|false`, `scope=global|local`, `device_id`, `limit`).
+    Returns rows newest first; default `limit=100`.
+  - `GET /api/sessions/current` — convenience endpoint returning the
+    active GLOBAL session and every active LOCAL session in one call.
+  - `GET /api/sessions/{id}` — detail.
+  - `POST /api/sessions` — start a session. Validates scope shape via
+    `model_validator` (GLOBAL must omit `device_id`; LOCAL must set it
+    and references the active GLOBAL as parent automatically).
+    Returns 409 on the partial-unique-index conflict, 422 on a missing
+    package, 422 if a LOCAL session is requested without an active
+    GLOBAL.
+  - `POST /api/sessions/{id}/stop` — close. Idempotent on
+    already-closed sessions. The DB triggers `end_local_children`
+    cascade-close LOCAL children when a GLOBAL closes;
+    `sessions_lock_package` flips `packages.is_locked = TRUE` on
+    first close.
+  - `GET /api/sessions/{id}/logs` — audit trail
+    (`session_logs` rows). `?order=asc|desc` (default ascending for a
+    chronological timeline). Returns 404 if the parent session doesn't
+    exist so an empty array is never ambiguous.
+- **`/api/packages/*`** in `services/hermes/api/routes/packages.py`:
+  - `GET /api/packages` — list (newest first).
+  - `GET /api/packages/{id}` — detail.
+  - `POST /api/packages` — create a fresh, unlocked package.
+  - `POST /api/packages/{id}/clone` — fork a package, copying every
+    `parameters` row over and setting `parent_package_id`. Canonical
+    flow for "edit a locked package": clone, edit the clone, start a
+    new session against it.
+- **SvelteKit `/sessions` page** in
+  `ui/src/routes/sessions/+page.svelte`. Active panel (global +
+  locals with Stop buttons), start-session form (scope picker that
+  auto-shows/hides device-id field, package dropdown with `default` /
+  `locked` tags surfaced, optional notes, `record_raw_samples`
+  toggle), and a Recent Sessions table that links to per-session
+  detail.
+- **SvelteKit `/sessions/[session_id]` detail page** in
+  `ui/src/routes/sessions/[session_id]/+page.svelte`. Header with
+  status pill (active/closed) and Stop button when active. Lifecycle
+  metadata grid (started/ended timestamps, started_by, ended_reason,
+  notes, package, parent session). Audit-log timeline rendering each
+  `session_logs` row with a colour-coded chip per event type (start,
+  stop, pause, resume, reconfigure, error) and the JSON `details`
+  pretty-printed.
+- **Top-nav** now has a `Sessions` item between `Events` and `Config`.
+- **TypeScript shapes** in `ui/src/lib/types.ts`: `PackageOut`,
+  `PackageIn`, `SessionScope`, `SessionLogEvent`, `SessionOut`,
+  `SessionStart`, `SessionStop`, `SessionLogOut`,
+  `CurrentSessionsOut`.
+- **30 new integration tests**:
+  - `tests/integration/test_packages_api.py` (7) — list / create /
+    get / clone-copies-parameter-rows / clone-doesn't-modify-source /
+    rejects-empty-name / minimal-payload.
+  - `tests/integration/test_sessions_api.py` (23) — current,
+    list-with-filters, GLOBAL-409-when-active, GLOBAL-success-after-
+    stop, LOCAL-422-with-no-active-global, LOCAL-success, two-
+    LOCALS-same-device-409, two-LOCALS-different-devices-success,
+    scope-shape-validators (422), unknown-package-422, idempotent-
+    stop, unknown-session-stop-404, end_local_children-cascade,
+    sessions_lock_package-trigger-on-close, start-writes-log,
+    stop-writes-log-with-reason, logs-404, logs-asc-vs-desc,
+    get-404, scope-filter, device_id-filter, sanity-on-log-rows.
+
+### Changed
+
+- **`services/hermes/api/main.py`** registers two new routers:
+  `/api/packages` and `/api/sessions`.
+- **Out of scope (deliberate)**: PATCH for packages (rename,
+  archive), DELETE for sessions/packages, pause/resume lifecycle
+  events, and an authenticated user identity in the `actor` field of
+  audit logs (currently hard-coded to `"api"` until the auth flow
+  ships). All non-blocking for the gap-5 operator workflow.
+
+Total tests now: 170 unit + 114 integration = 284 passing. Bench
+unchanged (gap 5 doesn't touch the hot path).
+
+UI: `pnpm check` (svelte-check) clean. Manual click-through in a
+browser was NOT done in this session; CI will exercise the routes.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
 ## [0.1.0-alpha.18] — 2026-04-25
 
 ### Operator UI — gap 4 (MQTT broker config + at-rest password encryption)
