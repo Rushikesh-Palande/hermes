@@ -28,7 +28,18 @@ from __future__ import annotations
 from hermes.db.models import EventType
 from hermes.detection.config import DetectorConfigProvider
 from hermes.detection.type_a import TypeADetector
+from hermes.detection.type_b import TypeBDetector
+from hermes.detection.type_c import TypeCDetector
 from hermes.detection.types import EventSink, Sample, SensorDetector
+
+# Fixed event-type order. Kept deterministic so tests can rely on it.
+# Type D will be appended here in Phase 3d.2 with the C-dependency wired
+# through ``_create``.
+_EVENT_TYPE_ORDER: tuple[EventType, ...] = (
+    EventType.A,
+    EventType.B,
+    EventType.C,
+)
 
 # A compound key per detector instance: (device_id, sensor_id, event_type).
 _DetectorKey = tuple[int, int, EventType]
@@ -53,16 +64,18 @@ class DetectionEngine:
         Feed one timestamp's worth of samples to all applicable detectors.
 
         ``values`` maps sensor_id (1..12) to the offset-corrected reading.
-        Iteration order follows dict insertion (Python 3.7+) so tests can
-        assert a deterministic sequence.
+        Sensor iteration follows dict insertion order; detector iteration
+        follows ``_EVENT_TYPE_ORDER`` so tests can assert a deterministic
+        sequence and Type D (once added) reads Type C's ``current_avg``
+        for the same sample.
         """
         for sensor_id, value in values.items():
             sample = Sample(ts=ts, device_id=device_id, sensor_id=sensor_id, value=value)
-            # Phase 3b/c: Type A only. Extend loop to B/C/D in Phase 3d.
-            detector = self._detector_for(device_id, sensor_id, EventType.A)
-            event = detector.feed(sample)
-            if event is not None:
-                self._sink.publish(event)
+            for event_type in _EVENT_TYPE_ORDER:
+                detector = self._detector_for(device_id, sensor_id, event_type)
+                event = detector.feed(sample)
+                if event is not None:
+                    self._sink.publish(event)
 
     def reset_device(self, device_id: int) -> None:
         """Drop all cached detectors for ``device_id``. Config reload hook."""
@@ -83,4 +96,9 @@ class DetectionEngine:
     def _create(self, device_id: int, sensor_id: int, event_type: EventType) -> SensorDetector:
         if event_type is EventType.A:
             return TypeADetector(self._config_provider.type_a_for(device_id, sensor_id))
-        raise NotImplementedError(f"detector for {event_type} lands in Phase 3d")
+        if event_type is EventType.B:
+            return TypeBDetector(self._config_provider.type_b_for(device_id, sensor_id))
+        if event_type is EventType.C:
+            return TypeCDetector(self._config_provider.type_c_for(device_id, sensor_id))
+        # Type D lands in Phase 3d.2; BREAK events arrive with mode switching.
+        raise NotImplementedError(f"detector for {event_type} not yet implemented")
