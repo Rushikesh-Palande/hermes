@@ -69,10 +69,20 @@ def test_jwt_expired_token_raises_invalid() -> None:
 
 
 def test_jwt_tampered_signature_rejected() -> None:
+    """
+    Flip a byte inside the PAYLOAD segment so the recomputed signature
+    won't match. (Tampering inside the trailing signature segment can
+    occasionally round-trip — base64url has multiple characters that
+    decode to the same byte at certain alignments — so the test would
+    flake.)
+    """
     user_id = uuid.uuid4()
     token = issue_token(user_id)
-    # Flip the last character of the signature.
-    bad = token[:-1] + ("A" if token[-1] != "A" else "B")
+    header, payload, signature = token.split(".")
+    # Flip the middle character of the payload segment.
+    mid = len(payload) // 2
+    flipped = payload[:mid] + ("A" if payload[mid] != "A" else "B") + payload[mid + 1 :]
+    bad = f"{header}.{flipped}.{signature}"
     with pytest.raises(InvalidTokenError):
         decode_token(bad)
 
