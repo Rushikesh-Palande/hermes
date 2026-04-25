@@ -122,13 +122,9 @@ async def test_export_filters_match_list_endpoint(api_client: AsyncClient) -> No
     base = datetime.now(tz=UTC)
     await _seed_event(session_id=session_id, triggered_at=base, device_id=1, sensor_id=3)
     await _seed_event(session_id=session_id, triggered_at=base, device_id=2, sensor_id=3)
-    await _seed_event(
-        session_id=session_id, triggered_at=base, device_id=1, sensor_id=7
-    )
+    await _seed_event(session_id=session_id, triggered_at=base, device_id=1, sensor_id=7)
 
-    resp = await api_client.get(
-        "/api/events/export?format=csv&device_id=1&sensor_id=3"
-    )
+    resp = await api_client.get("/api/events/export?format=csv&device_id=1&sensor_id=3")
     assert resp.status_code == 200
     rows = list(csv.DictReader(io.StringIO(resp.text)))
     assert len(rows) == 1

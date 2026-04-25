@@ -11,10 +11,13 @@ handlers pull them in via `Depends(...)`, which gives us:
       = lambda: fake_user` replaces auth with a fixture in one line.
 
 Dev-mode bypass:
-    When ``HERMES_DEV_MODE=1``, ``get_current_user()`` synthesises an
-    in-memory admin user (never persisted). This unblocks local work
-    before the OTP + JWT flow lands in Phase 3.5. Production deployments
-    MUST set ``HERMES_DEV_MODE=0`` so the bypass is unreachable.
+    When ``HERMES_DEV_MODE=1`` AND no token is presented,
+    ``get_current_user()`` synthesises an in-memory admin user (never
+    persisted). This keeps tests + first-boot dev unblocked. Production
+    deployments MUST set ``HERMES_DEV_MODE=0`` so the bypass is
+    unreachable. When a token IS presented, JWT decode happens regardless
+    of the bypass flag — so a partially-rolled-out frontend can flip to
+    real auth without flipping the env.
 """
 
 from __future__ import annotations
@@ -26,8 +29,10 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hermes.auth.jwt import InvalidTokenError, decode_token
 from hermes.config import get_settings
 from hermes.db.engine import async_session
 from hermes.db.models import User
@@ -74,31 +79,45 @@ async def get_current_user(
     Resolve the authenticated user from a JWT bearer token.
 
     Order of operations:
-        1. If HERMES_DEV_MODE is set AND no token is presented, return a
-           synthetic admin user (bypass). This keeps local dev and CI
-           unblocked while the OTP/JWT flow is still under construction.
-        2. Otherwise require a token; raise 401 if missing.
-        3. TODO(phase-3.5-auth): decode JWT, lookup User in DB, check
-           is_enabled, return. Until then, a real token path is not
-           implemented and raises 501.
+        1. Token present → decode JWT, look up User, check is_enabled.
+        2. No token + HERMES_DEV_MODE=1 → return the synthetic admin.
+        3. Otherwise → 401.
+
+    Putting JWT decode first means a real token always wins over the
+    bypass, so a frontend running in dev mode can flip to real auth
+    without flipping any env vars.
     """
     settings = get_settings()
 
-    if settings.hermes_dev_mode and not token:
+    if token:
+        try:
+            user_id = decode_token(token)
+        except InvalidTokenError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=str(exc),
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from exc
+
+        user = (
+            await session.execute(select(User).where(User.user_id == user_id))
+        ).scalar_one_or_none()
+        if user is None or not user.is_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="user not found or disabled",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return user
+
+    if settings.hermes_dev_mode:
         del session  # dev bypass; no DB round-trip
         return _synthetic_dev_user()
 
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    del session  # not yet used
     raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="JWT verification lands in Phase 3.5",
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+        headers={"WWW-Authenticate": "Bearer"},
     )
 
 

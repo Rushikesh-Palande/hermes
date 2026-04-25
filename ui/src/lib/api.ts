@@ -12,6 +12,38 @@
  * "works in dev, fails in prod" CORS bugs on day one.
  */
 
+// localStorage key used by every page that needs to read or set the
+// access token. Centralised so a future move to a cookie or in-memory
+// store only has to change `getStoredToken` / `setStoredToken`.
+const TOKEN_STORAGE_KEY = 'hermes.access_token';
+
+export function getStoredToken(): string | null {
+	if (typeof window === 'undefined') return null;
+	try {
+		return window.localStorage.getItem(TOKEN_STORAGE_KEY);
+	} catch {
+		return null;
+	}
+}
+
+export function setStoredToken(token: string): void {
+	if (typeof window === 'undefined') return;
+	try {
+		window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+	} catch {
+		/* private mode etc. — best-effort */
+	}
+}
+
+export function clearStoredToken(): void {
+	if (typeof window === 'undefined') return;
+	try {
+		window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+	} catch {
+		/* best-effort */
+	}
+}
+
 export class ApiError extends Error {
 	constructor(
 		public readonly status: number,
@@ -35,15 +67,29 @@ export async function apiFetch<T>(path: string, options: ApiOptions = {}): Promi
 	// Build the RequestInit carefully — exactOptionalPropertyTypes
 	// means we can't pass `body: undefined` or `signal: undefined`.
 	const init: RequestInit = { method };
+	const headers: Record<string, string> = {};
 	if (body !== undefined) {
-		init.headers = { 'Content-Type': 'application/json' };
+		headers['Content-Type'] = 'application/json';
 		init.body = JSON.stringify(body);
+	}
+	const token = getStoredToken();
+	if (token) {
+		headers['Authorization'] = `Bearer ${token}`;
+	}
+	if (Object.keys(headers).length > 0) {
+		init.headers = headers;
 	}
 	if (signal !== undefined) {
 		init.signal = signal;
 	}
 
 	const res = await fetch(path, init);
+
+	// 401 from any endpoint clears the cached token so the UI's auth
+	// guard redirects to /login on the next render.
+	if (res.status === 401) {
+		clearStoredToken();
+	}
 
 	if (!res.ok) {
 		let detail = res.statusText;
