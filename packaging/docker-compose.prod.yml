@@ -1,0 +1,143 @@
+# HERMES — production compose stack.
+#
+# One file, four services: Postgres+TimescaleDB, Mosquitto, the
+# HERMES API container, and the HERMES ingest container. Persists
+# data in named volumes; on first run it bootstraps the database
+# automatically.
+#
+# Quickstart on any Linux with Docker:
+#
+#     curl -fsSL https://raw.githubusercontent.com/Rushikesh-Palande/hermes/main/packaging/docker-compose.prod.yml \
+#         -o docker-compose.yml
+#     docker compose pull && docker compose up -d
+#     # access at http://localhost:8080
+#
+# Or from a clone:
+#
+#     docker compose -f packaging/docker-compose.prod.yml up -d
+#
+# Tearing down:
+#
+#     docker compose -f packaging/docker-compose.prod.yml down       # keeps data
+#     docker compose -f packaging/docker-compose.prod.yml down -v    # nukes data
+#
+# Override secrets with an .env file in the same directory:
+#
+#     # .env
+#     HERMES_JWT_SECRET=<48-bytes-base64>
+#     POSTGRES_PASSWORD=<set-something-real>
+#     MQTT_USERNAME=
+#     MQTT_PASSWORD=
+#
+# Replace `image: hermes:local` with the published tag once we
+# publish to a registry (planned for alpha.27+):
+#
+#     image: ghcr.io/rushikesh-palande/hermes:0.1.0-alpha.X
+
+name: hermes
+
+services:
+  postgres:
+    image: timescale/timescaledb:2.17.2-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     hermes_migrate
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB:       hermes
+      # TS-tune does the right thing on container memory limits.
+      TS_TUNE_MEMORY:    1GB
+      TS_TUNE_NUM_CPUS:  2
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Mount the migrations into the container so a one-shot apply
+      # via `docker compose run --rm api ./scripts/db-migrate.sh` works.
+      - ../migrations:/migrations:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hermes_migrate -d hermes"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0.20
+    restart: unless-stopped
+    ports:
+      - "1883:1883"   # MQTT, listening for STM32 / external publishers
+    volumes:
+      - mqtt-data:/mosquitto/data
+      - mqtt-log:/mosquitto/log
+      # If you have a custom mosquitto.conf, mount it here:
+      # - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  # HERMES API + UI. Publishes the SvelteKit static bundle (default)
+  # OR proxies to the embedded adapter-node — depends on the build.
+  api:
+    image: hermes:local
+    build:
+      context: ..
+      dockerfile: packaging/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://hermes_migrate:${POSTGRES_PASSWORD:-changeme}@postgres:5432/hermes"
+      MIGRATE_DATABASE_URL: "postgresql://hermes_migrate:${POSTGRES_PASSWORD:-changeme}@postgres:5432/hermes"
+      HERMES_JWT_SECRET: "${HERMES_JWT_SECRET:?HERMES_JWT_SECRET must be set in .env or environment}"
+      HERMES_API_HOST: 0.0.0.0
+      HERMES_API_PORT: "8080"
+      HERMES_LOG_FORMAT: json
+      HERMES_INGEST_MODE: live_only   # API only fills live ring; ingest container does detection
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_USERNAME: "${MQTT_USERNAME:-}"
+      MQTT_PASSWORD: "${MQTT_PASSWORD:-}"
+    ports:
+      - "8080:8080"
+    command: >
+      bash -c "
+        ./scripts/db-migrate.sh && exec hermes-api
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+
+  # Detection / ingest worker. Subscribes to MQTT, runs detectors,
+  # writes events + windows to Postgres.
+  ingest:
+    image: hermes:local
+    build:
+      context: ..
+      dockerfile: packaging/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+      api:
+        condition: service_started
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://hermes_migrate:${POSTGRES_PASSWORD:-changeme}@postgres:5432/hermes"
+      MIGRATE_DATABASE_URL: "postgresql://hermes_migrate:${POSTGRES_PASSWORD:-changeme}@postgres:5432/hermes"
+      HERMES_JWT_SECRET: "${HERMES_JWT_SECRET:?HERMES_JWT_SECRET must be set}"
+      HERMES_LOG_FORMAT: json
+      HERMES_INGEST_MODE: all
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_USERNAME: "${MQTT_USERNAME:-}"
+      MQTT_PASSWORD: "${MQTT_PASSWORD:-}"
+      EVENT_TTL_SECONDS: "5.0"
+      LIVE_BUFFER_MAX_SAMPLES: "2000"
+      MQTT_DRIFT_THRESHOLD_S: "5.0"
+    command: ["hermes-ingest"]
+
+volumes:
+  pgdata:    {}
+  mqtt-data: {}
+  mqtt-log:  {}

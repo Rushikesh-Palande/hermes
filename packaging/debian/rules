@@ -1,0 +1,36 @@
+#!/usr/bin/make -f
+# debian/rules — Debian package build orchestration.
+#
+# Standard debhelper-compat=13 layout. Most steps are no-ops here
+# because we're shipping a Python application + JS bundle, not C
+# source — the heavy lifting (venv build, UI build) happens at
+# install time via debian/postinst → /opt/hermes/packaging/install.sh.
+#
+# To build:
+#     dpkg-buildpackage -us -uc -b
+# Output appears one directory up: hermes_X.Y.Z_amd64.deb
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	# Pre-build the SvelteKit bundle so the .deb ships a static UI.
+	# install.sh detects ui/build/ and skips re-building it.
+	cd ui && pnpm install --frozen-lockfile && pnpm build
+
+override_dh_auto_install:
+	# Stage the source tree under /opt/hermes/ in the build root.
+	# debhelper handles installing files matched by debian/install.
+	dh_auto_install
+
+override_dh_auto_test:
+	# Skip dh_auto_test — we run pytest in CI, not at .deb build time.
+	# Adding it here would slow every package build by ~3 minutes.
+
+override_dh_strip:
+	# Nothing to strip; pure Python + JS.
+
+override_dh_systemd_enable override_dh_systemd_start:
+	# debhelper would enable units it found in debian/*.service;
+	# we install them via install.sh from /opt/hermes/packaging/systemd/
+	# so explicit no-op here.
