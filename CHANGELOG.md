@@ -8,6 +8,26 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.4] — 2026-04-25
+
+### Fixed
+
+- `migrations/0003_hypertables.sql` now enables compression on the
+  `events` hypertable before `0005` adds the compression policy.
+  TimescaleDB 2.17 rejects `add_compression_policy` on a hypertable
+  without `timescaledb.compress` settings, surfacing as
+  `FeatureNotSupportedError: compression not enabled on hypertable`
+  during CI integration tests. `session_samples` already had its
+  matching `ALTER TABLE` in 0003.
+- `tests/integration/conftest.py` no longer drops the public schema
+  between tests. The previous approach unloaded the TimescaleDB
+  extension catalog entry but left the shared library loaded in the
+  Postgres backend, so the next `CREATE EXTENSION timescaledb` on the
+  same connection raised `DuplicateObjectError: extension already
+  loaded with another version`. Switched to the canonical
+  migrate-once-per-session + `TRUNCATE … RESTART IDENTITY CASCADE`
+  pattern. Roughly an order of magnitude faster, too.
+
 ## [0.1.0-alpha.3] — 2026-04-25
 
 ### Added
@@ -123,7 +143,8 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
   CODE_OF_CONDUCT, CODEOWNERS, issue and PR templates, Dependabot config,
   `.gitignore`, `.gitattributes`, `.editorconfig`.
 
-[Unreleased]:     https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.3...HEAD
+[Unreleased]:     https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.4...HEAD
+[0.1.0-alpha.4]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.3...v0.1.0-alpha.4
 [0.1.0-alpha.3]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.2...v0.1.0-alpha.3
 [0.1.0-alpha.2]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
 [0.1.0-alpha.1]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.0.1...v0.1.0-alpha.1
