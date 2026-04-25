@@ -8,6 +8,95 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.20] — 2026-04-25
+
+### Continuous-sample writer — gap 6
+
+Wires up the `session_samples` hypertable so an operator who flips
+`record_raw_samples=true` on a session actually gets a complete raw
+archive of every sensor reading for the session's lifetime. Default
+behaviour is unchanged — the writer is a fast no-op when no session
+has recording on, so existing deployments see zero impact.
+
+### Added
+
+- **`SessionSampleWriter`** in
+  `services/hermes/ingest/session_samples.py`. Owned by
+  `IngestPipeline`, started/stopped alongside it (skipped in
+  `live_only` mode where detection shards own this path). Design:
+  - **Hot path** (`push_snapshot`) is one dict lookup + early return
+    when no recording covers the device. When recording is on, a
+    snapshot allocates 12 row tuples and appends them to an in-memory
+    buffer. No DB I/O, no logging, no async.
+  - **Refresh loop** queries `sessions WHERE ended_at IS NULL AND
+    record_raw_samples = true` every 5 s and atomically swaps the
+    cached `(global_session_id, local_sessions: dict[device_id, sid])`
+    pair. Operator changes propagate within one refresh interval; the
+    hot path reads via plain attribute lookup with no locking.
+  - **Flush loop** drains the buffer every 1 s into
+    `session_samples` via asyncpg `copy_records_to_table`. Splits
+    into 5 000-row chunks so a busy second doesn't tie up the
+    connection. Increments a Prometheus counter per row written and
+    per batch dispatched.
+  - **Backpressure** — when the buffer hits its 60 000-row cap
+    (~2 s at production rate), excess rows drop and increment
+    `hermes_session_samples_dropped_total`. Operators see drops in
+    Grafana before they see DB latency.
+  - **Lifecycle** — `start()` opens a dedicated asyncpg connection
+    (separate from the SQLAlchemy pool), runs an initial refresh so
+    `push_snapshot` has the up-to-date set on the very first sample,
+    then spawns the two background tasks. `stop()` cancels both,
+    flushes whatever's left in the buffer, and closes the connection.
+- **Session resolution rule** — LOCAL session for the device wins
+  over GLOBAL. If neither covers the device, the snapshot is
+  silently dropped. Mirrors the detector-config resolution order so
+  operator intuition stays consistent.
+- **`SessionSample`** SQLAlchemy model (mirrors `session_samples`
+  table from migration 0002).
+- **5 new Prometheus metrics**:
+  - `hermes_session_samples_written_total`
+  - `hermes_session_samples_dropped_total`
+  - `hermes_session_samples_batches_flushed_total`
+  - `hermes_session_samples_queue_depth`
+  - `hermes_session_samples_recording_active`
+- **14 new tests**: 9 unit
+  (`tests/unit/test_session_samples_writer.py` — no-recording no-op,
+  GLOBAL captures all devices, LOCAL overrides GLOBAL, LOCAL-only
+  device routing, buffer-overflow drop accounting, full-buffer drop,
+  recording-state flag, row-tuple shape matches DB column order,
+  queue-depth gauge tracks buffer) and 5 integration
+  (`tests/integration/test_session_samples_writer.py` — end-to-end
+  persist with GLOBAL recording, no writes when nothing recording,
+  refresh loop catches sessions started after writer.start(),
+  graceful stop flushes leftover buffer, LOCAL session routes only
+  its own device).
+
+### Changed
+
+- **`IngestPipeline`** constructs a `SessionSampleWriter` (skipped in
+  `live_only` mode), starts/stops it on lifecycle hooks, and passes
+  it into `_consume` via `sample_writer=`.
+- **`_consume`** calls `sample_push(device_id, ts, sensor_values)`
+  inside the existing `buffers` time-stage, after `live_push` and
+  `window_push`. When `sample_writer` is None (the bench, tests not
+  exercising recording), the local pre-bind makes this a single
+  `is None` check per snapshot.
+
+### Performance impact
+
+The writer's hot path is a no-op when no recording is active.
+Throughput bench (median of 5 runs) is ~10 000 msg/s on a developer
+laptop — consistent with post-alpha.17 numbers (high run-to-run
+variance, 8 800 - 11 200). On Pi 4 (~3× slower), estimated ~3 300
+msg/s vs. the 2 000 msg/s production target — ~1.6× headroom even
+when recording is OFF. With recording ON, the writer adds roughly
+12 list appends + one `datetime.fromtimestamp` per snapshot;
+benchmarks of the recording-on path are pending Pi 4 soak.
+
+Total tests now: 179 unit + 119 integration = 298 passing.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
 ## [0.1.0-alpha.19] — 2026-04-25
 
 ### Operator UI — gap 5 (Sessions + Packages)

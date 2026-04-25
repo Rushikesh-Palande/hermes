@@ -95,6 +95,7 @@ from hermes.ingest.clock import ClockRegistry
 from hermes.ingest.live_data import LiveDataHub
 from hermes.ingest.offsets import OffsetCache
 from hermes.ingest.parser import parse_stm32_adc_payload
+from hermes.ingest.session_samples import SessionSampleWriter
 from hermes.logging import configure_logging, get_logger
 
 log = get_logger(__name__, component="ingest")
@@ -127,6 +128,7 @@ async def _consume(
     stop_event: asyncio.Event,
     shard_count: int = 1,
     shard_index: int = 0,
+    sample_writer: SessionSampleWriter | None = None,
 ) -> None:
     """
     Drain the handoff queue and run the full ingestion pipeline.
@@ -175,6 +177,11 @@ async def _consume(
     window_push = window_buffer.push_snapshot
     # Detection feed is None in live_only mode (API process for SSE).
     detect_feed = detection.feed_snapshot if detection is not None else None
+    # Continuous-sample writer (gap 6). When no session has
+    # record_raw_samples=true, push_snapshot is a fast no-op (one
+    # dict lookup + early return). Bound to a local so the hot path
+    # avoids a global+attr lookup per snapshot.
+    sample_push = sample_writer.push_snapshot if sample_writer is not None else None
     # Shard predicate: pre-built once. When count == 1 we never check it.
     sharded = shard_count > 1
 
@@ -227,6 +234,9 @@ async def _consume(
         with metrics_time_stage("buffers"):
             live_push(device_id, ts, sensor_values)
             window_push(device_id, ts, sensor_values)
+            if sample_push is not None:
+                # No-op early return when no session is recording.
+                sample_push(device_id, ts, sensor_values)
 
         # Counter ticks once per sensor reading actually fed into the
         # pipeline. Same labelling as MSGS_RECEIVED_TOTAL so a Grafana
@@ -274,6 +284,16 @@ class IngestPipeline:
         self.window_buffer = EventWindowBuffer()
         self.offset_cache = OffsetCache()
         self._clocks = ClockRegistry(drift_threshold_s=settings.mqtt_drift_threshold_s)
+
+        # Continuous-sample writer (gap 6). Created unconditionally so
+        # the hot path doesn't need a None-check; ``push_snapshot`` is
+        # a fast no-op when no session has ``record_raw_samples=true``.
+        # The connection is opened lazily in ``start()`` so module
+        # construction stays cheap and synchronous. live_only mode
+        # (multi-shard API) skips it — detection shards own this path.
+        self.session_sample_writer: SessionSampleWriter | None = None
+        if settings.hermes_ingest_mode != "live_only":
+            self.session_sample_writer = SessionSampleWriter(dsn=settings.migrate_database_url)
 
         # In live_only mode (multi-shard API process), we run no detection
         # and own no sinks — purpose is purely to keep the live ring
@@ -347,6 +367,15 @@ class IngestPipeline:
 
         if self._db_sink is not None:
             await self._db_sink.start()
+
+        # Best-effort start of the continuous-sample writer. A connect
+        # failure here is non-fatal — the hot path stays a no-op until
+        # the writer is healthy on the next start cycle.
+        if self.session_sample_writer is not None:
+            try:
+                await self.session_sample_writer.start()
+            except Exception:
+                log.exception("session_samples_writer_start_failed")
 
         log.info(
             "ingest_starting",
@@ -425,6 +454,7 @@ class IngestPipeline:
                 self._stop_event,
                 shard_count=self._shard_count,
                 shard_index=self._shard_index,
+                sample_writer=self.session_sample_writer,
             ),
             name="mqtt-consumer",
         )
@@ -452,6 +482,13 @@ class IngestPipeline:
             self._client.disconnect()
         if self._db_sink is not None:
             await self._db_sink.stop()
+        # Stop the continuous-sample writer last so any final samples
+        # buffered during shutdown still flush to session_samples.
+        if self.session_sample_writer is not None:
+            try:
+                await self.session_sample_writer.stop()
+            except Exception:
+                log.exception("session_samples_writer_stop_failed")
 
 
 async def run() -> None:

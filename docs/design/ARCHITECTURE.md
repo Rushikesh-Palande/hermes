@@ -196,6 +196,7 @@ If you add work to `_consume`, **bench it**. The bench in
 | `services/hermes/ingest/offsets.py`                 | `OffsetCache` — per-sensor calibration                            |
 | `services/hermes/ingest/parser.py`                  | `parse_stm32_adc_payload` — JSON shape → `{sensor_id: float}`    |
 | `services/hermes/ingest/live_data.py`               | `LiveDataHub` — per-device ring buffer for SSE                    |
+| `services/hermes/ingest/session_samples.py`         | `SessionSampleWriter` — opt-in raw-archive writer (asyncpg COPY) |
 
 ---
 
