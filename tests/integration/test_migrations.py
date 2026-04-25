@@ -13,8 +13,6 @@ from pathlib import Path
 
 import asyncpg
 import pytest
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from hermes.config import get_settings
 
@@ -61,8 +59,7 @@ async def test_migrations_produce_all_expected_tables() -> None:
             await conn.execute(sql)
 
         rows = await conn.fetch(
-            "SELECT table_name FROM information_schema.tables"
-            " WHERE table_schema = 'public'"
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
         )
         found = {row["table_name"] for row in rows}
     finally:

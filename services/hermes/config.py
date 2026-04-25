@@ -90,6 +90,15 @@ class Settings(BaseSettings):
     hermes_metrics_enabled: bool = True
     hermes_metrics_port: int = 9090
 
+    # ─── Ingest pipeline ───────────────────────────────────────────
+    # Depth of in-memory ring buffer per device (samples). At 123 Hz this
+    # is ~16 seconds of history; SSE clients typically request ≤6 s.
+    live_buffer_max_samples: int = 2000
+
+    # Re-anchor the STM32 clock offset when computed wall-time diverges
+    # from receive-time by more than this many seconds (STM counter wrap).
+    mqtt_drift_threshold_s: float = 5.0
+
     # ─── Development ───────────────────────────────────────────────
     hermes_dev_mode: bool = False
 
