@@ -1,0 +1,13 @@
+# What goes where during dpkg-deb assembly.
+# Format: <source-glob>  <destination-dir>
+services/         opt/hermes/services
+ui/               opt/hermes/ui
+migrations/       opt/hermes/migrations
+scripts/          opt/hermes/scripts
+packaging/        opt/hermes/packaging
+docs/             opt/hermes/docs
+pyproject.toml    opt/hermes
+uv.lock           opt/hermes
+README.md         opt/hermes
+LICENSE           opt/hermes
+CHANGELOG.md      opt/hermes

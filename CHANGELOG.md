@@ -8,6 +8,98 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.26] — 2026-04-26
+
+### Production packaging — three install paths
+
+User asked for "a file that will run on any Linux even brand new
+without any software and dependency download". Truly zero-deps
+isn't possible in a single artefact (would need to bundle Postgres,
+TimescaleDB, Mosquitto, Python, Node, ~500 MB total per arch). What
+this release ships instead:
+
+- **Path A — `install.sh`**: one-shot installer for any deb-based
+  or rpm-based Linux with internet. Detects distro family
+  (deb / rpm / arch / alpine), installs system deps via the right
+  package manager (postgresql-16, timescaledb, mosquitto, nginx,
+  python3.11), creates the `hermes` system user + Postgres role +
+  database, generates a JWT secret, builds the Python venv + the
+  SvelteKit UI, runs migrations, installs systemd units, configures
+  nginx, starts the services. Idempotent — re-running upgrades in
+  place. ~5 minutes on a fresh Pi 4.
+
+- **Path B — Container** (`Dockerfile` + `docker-compose.prod.yml`):
+  any Linux with Docker. Multi-stage build (ui-builder + py-builder
+  + slim runtime); ~317 MB image. Compose stack includes Postgres,
+  Mosquitto, hermes-api, and hermes-ingest in four containers
+  sharing a network. Includes healthcheck, named volumes for data
+  persistence, and a multi-arch buildx recipe in INSTALLATION.md.
+
+- **Path C — Offline bundle** (`build-offline-bundle.sh`):
+  air-gapped install. Builds a ~150 MB compressed `.tar.gz`
+  containing the source tree + every system `.deb` (postgres,
+  timescaledb, mosquitto, nginx, python3.11) + a Python wheelhouse
+  with every locked dep + a pre-built SvelteKit bundle. Install via
+  `install.sh --offline` with no internet access required.
+
+### Added
+
+- **`packaging/install.sh`** — distro-aware one-shot installer with
+  `--operator-email`, `--offline`, `--skip-ui`, `--skip-nginx` flags.
+  Idempotent; exit codes documented.
+- **`packaging/uninstall.sh`** — clean removal with `--drop-database`
+  + `--keep-config` flags. Stops services, removes systemd units,
+  optionally drops DB + roles, removes system user.
+- **`packaging/Dockerfile`** — three-stage build (Node UI builder,
+  Python venv builder, slim runtime). Final image runs as non-root
+  user `hermes`, healthchecks `/api/health`, uses tini as init.
+- **`packaging/docker-compose.prod.yml`** — production stack with
+  resource-limit guidance for Pi 4 / cloud-VM deployments.
+- **`packaging/build-offline-bundle.sh`** — Path C bundle builder.
+  Stages .debs via `apt-get download`, builds a wheelhouse via
+  `uv pip wheel`, pre-builds the UI, tars it all up.
+- **`packaging/nginx/hermes.conf`** — TLS-ready reverse proxy site.
+  Splits `/api/live_stream` (proxy_buffering off so SSE flushes
+  immediately) from the rest of `/api`. Serves the SvelteKit static
+  bundle from `/opt/hermes/ui/build/client/`. Compatible with
+  `certbot --nginx` for one-command TLS upgrade.
+- **`packaging/debian/`** — proper Debian package metadata:
+  `control` (declares apt deps), `changelog`, `copyright`, `rules`
+  (debhelper orchestration), `install` (source → /opt/hermes/
+  mapping), `postinst` (creates system user, runs install.sh),
+  `postrm` (clean removal on apt purge). End users:
+  `sudo dpkg -i hermes_X.Y.Z_amd64.deb && sudo apt install -f`.
+- **`docs/operations/INSTALLATION.md`** (~470 lines) — comprehensive
+  walkthrough of all three paths. Pick-your-path decision tree,
+  per-path quickstart + step-by-step internals, distro support
+  matrix, multi-arch builds, common-failure lookup, "what you
+  DON'T get from any of these paths" honest scope statement.
+- **`packaging/README.md`** — updated to map every file in the dir.
+
+### Changed
+
+- **`packaging/Dockerfile`**: builder stage now works under
+  `/opt/hermes` (not `/build/`) so the editable install's `.pth`
+  file resolves correctly when copied to the runtime stage.
+
+### Out of scope (deliberate, not in this release)
+
+- A "literally any Linux, single-file, zero deps" AppImage. As called
+  out in INSTALLATION.md: that would mean bundling Postgres +
+  TimescaleDB + Mosquitto + Python + Node binaries per architecture,
+  which is a separate release-engineering project. The container path
+  (B) is the closest approximation that ships from one repo.
+- Published Docker registry images. Today users build locally via
+  `docker compose up --build`. A future release will publish to
+  ghcr.io or Docker Hub so `docker compose up` is one command.
+- Automated TLS via certbot. INSTALLATION.md tells operators to run
+  `certbot --nginx` after pointing DNS; we don't auto-provision.
+
+Total tests: still 200 unit + 133 integration + 3 golden = 336
+passing. No code changes; ruff + mypy clean.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
 ## [0.1.0-alpha.25] — 2026-04-26
 
 ### Documentation sprint — 10 new in-depth guides + reference catalogs

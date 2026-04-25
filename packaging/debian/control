@@ -1,0 +1,43 @@
+Source: hermes
+Section: misc
+Priority: optional
+Maintainer: EmbedSquare <ops@embedsquare.com>
+Build-Depends: debhelper-compat (= 13),
+               python3-all,
+               python3-venv,
+               nodejs,
+               npm
+Standards-Version: 4.6.2
+Homepage: https://github.com/Rushikesh-Palande/hermes
+
+Package: hermes
+Architecture: any
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         python3.11,
+         python3-venv,
+         postgresql-16,
+         timescaledb-2-postgresql-16,
+         mosquitto,
+         nginx,
+         adduser
+Recommends: certbot, python3-certbot-nginx
+Description: HERMES — industrial sensor monitoring + event detection
+ HERMES ingests 12-channel ADC telemetry from STM32 hardware over MQTT
+ at ~100 Hz per sensor, runs four parallel event-detection algorithms
+ (A/B/C/D + BREAK mode transition), persists events with +-9 s context
+ windows, and presents live and historical data through a SvelteKit
+ dashboard.
+ .
+ The package installs HERMES under /opt/hermes/, creates a `hermes`
+ system user, sets up a Postgres role and database, installs systemd
+ units (hermes-api.service + hermes-ingest.service), and configures
+ nginx as a reverse proxy. After install:
+ .
+   * UI:   http://<host>/
+   * API:  http://<host>:8080/api/health
+   * Logs: journalctl -u hermes-api -u hermes-ingest -f
+ .
+ Designed for continuous unattended operation on a Raspberry Pi 4 in
+ industrial environments. See /opt/hermes/docs/operations/ for the
+ ops runbook.
