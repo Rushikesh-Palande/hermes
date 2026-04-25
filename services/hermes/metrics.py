@@ -86,6 +86,20 @@ SESSION_SAMPLES_BATCHES_FLUSHED_TOTAL = Counter(
     "COPY batches dispatched by the session-samples writer.",
 )
 
+# ─── Modbus poller (gap 7) ─────────────────────────────────────────
+
+MODBUS_READS_OK_TOTAL = Counter(
+    "hermes_modbus_reads_ok_total",
+    "Successful Modbus TCP register reads, per device.",
+    ["device_id"],
+)
+
+MODBUS_READS_FAILED_TOTAL = Counter(
+    "hermes_modbus_reads_failed_total",
+    "Failed Modbus TCP reads (timeout, exception, error response).",
+    ["device_id"],
+)
+
 # ─── Gauges — current state ────────────────────────────────────────
 
 CONSUME_QUEUE_DEPTH = Gauge(
@@ -106,6 +120,11 @@ SESSION_SAMPLES_QUEUE_DEPTH = Gauge(
 SESSION_SAMPLES_RECORDING_ACTIVE = Gauge(
     "hermes_session_samples_recording_active",
     "1 if at least one active session has record_raw_samples=true, else 0.",
+)
+
+MODBUS_POLLERS_ACTIVE = Gauge(
+    "hermes_modbus_pollers_active",
+    "Number of Modbus TCP pollers the manager currently has running.",
 )
 
 MQTT_CONNECTED = Gauge(
