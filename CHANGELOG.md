@@ -8,6 +8,86 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.21] — 2026-04-26
+
+### Modbus TCP support — gap 7
+
+The `DeviceProtocol.MODBUS_TCP` enum value and the `modbus_config`
+JSONB column have been in place since alpha.5; this release wires up
+the actual polling code so an operator can configure a Modbus device
+and have its registers ingested into the same downstream pipeline as
+MQTT-sourced data (offsets → live ring buffer → window buffer →
+detection → session_samples).
+
+### Added
+
+- **`services/hermes/ingest/modbus.py`** with three pieces:
+  - `ModbusConfig` — pydantic model that validates the `modbus_config`
+    JSONB shape: `host`, `port`, `unit_id`, `register_start`,
+    `register_count` (default 12), `scaling`, `poll_interval_ms`
+    (default 100 = 10 Hz), `timeout_s`. Also `parse_modbus_config()`
+    which logs + returns None for malformed JSONB (defence in depth).
+  - `ModbusPoller` — one async pymodbus `AsyncModbusTcpClient` + a
+    poll task. Reads `register_count` input registers starting at
+    `register_start`, decodes each 16-bit word to a float via
+    `raw / scaling`, and invokes a downstream snapshot callback with
+    `(device_id, ts, {sensor_id: value})`. Reconnect on the fly if
+    the client drops; one bad cycle never blows up the loop.
+  - `ModbusManager` — watches `devices` for `protocol=modbus_tcp AND
+    is_active=true` every 5 s and spawns/cancels one poller per
+    device. Config changes restart the poller with the new params;
+    disabled or deleted devices have their pollers torn down.
+- **`IngestPipeline._on_modbus_snapshot`** — the downstream callback
+  the manager passes to each poller. Re-runs offset correction, fills
+  the live + window buffers, ticks the same Prometheus counters that
+  the MQTT path uses (so Grafana sums work uniformly across sources),
+  feeds the detection engine, and pushes to the
+  `SessionSampleWriter`. Modbus and MQTT data flow through the
+  identical detection chain — operators can mix sources on the same
+  detection thresholds.
+- **`pymodbus>=3.7`** runtime dep.
+- **Two new Prometheus counters + one gauge**:
+  - `hermes_modbus_reads_ok_total{device_id}`
+  - `hermes_modbus_reads_failed_total{device_id}`
+  - `hermes_modbus_pollers_active`
+- **24 new tests**:
+  - `tests/unit/test_modbus_config.py` (18) — config validation,
+    bad-input rejection (host/port/unit_id/register_count/scaling/
+    interval/timeout boundaries), `parse_modbus_config` returning
+    None on invalid JSONB, full and minimal payload round-trips.
+  - `tests/integration/test_modbus_poller.py` (6) — spins up a real
+    pymodbus async server in-process (using the new pymodbus 3.13
+    `SimData`/`SimDevice` API on `ModbusTcpServer`), seeds 12 input
+    registers, and verifies: one poll cycle reads + decodes correctly,
+    scaling divides raw values, no-server doesn't crash the poller,
+    `ModbusManager` discovers a Modbus device row and starts polling,
+    refresh loop catches devices added after `start()`, refresh loop
+    drops pollers when a device is disabled.
+
+### Changed
+
+- **`IngestPipeline.__init__`** constructs a `ModbusManager` (skipped
+  in `live_only` mode), and `start()` / `stop()` wire its lifecycle.
+  Manager `stop()` runs BEFORE the consumer drain so no new Modbus
+  snapshots arrive into a torn-down detection engine.
+
+### Out of scope (deliberate, follow-ups can land independently)
+
+- 32-bit float / int register types. Legacy reads 12 uint16; we match
+  that. A future `register_layout` field on `ModbusConfig` extends it.
+- Modbus RTU (serial). TCP only.
+- Read retries within a single poll cycle. The legacy did 3 retries;
+  we let the next poll be the retry — same long-run outcome, simpler.
+- A UI for editing `modbus_config` on a device. The `/api/devices`
+  endpoint already accepts it; a dedicated form lands with the
+  system-tunables UI in gap 8.
+
+Total tests now: 197 unit + 125 integration = 322 passing. Bench
+unchanged (Modbus is opt-in; manager idles when no Modbus devices
+are configured).
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
 ## [0.1.0-alpha.20] — 2026-04-25
 
 ### Continuous-sample writer — gap 6
