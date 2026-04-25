@@ -99,6 +99,12 @@ class Settings(BaseSettings):
     # from receive-time by more than this many seconds (STM counter wrap).
     mqtt_drift_threshold_s: float = 5.0
 
+    # How long ``TtlGateSink`` holds a fired event before forwarding to
+    # the durable sinks (DB + outbound MQTT). Within this window,
+    # duplicates of the same type are merged and lower-priority types
+    # are blocked. Legacy default is 5 s. BREAK events bypass.
+    event_ttl_seconds: float = 5.0
+
     # ─── Development ───────────────────────────────────────────────
     hermes_dev_mode: bool = False
 

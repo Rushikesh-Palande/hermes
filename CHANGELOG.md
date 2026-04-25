@@ -8,6 +8,44 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.13] — 2026-04-25
+
+### Added
+
+- **TTL gate** (gap 2, `EVENT_DETECTION_CONTRACT.md` §8). New
+  `services/hermes/detection/ttl_gate.py` implements `TtlGateSink`,
+  which sits between the detection engine and the durable sinks
+  (DB + outbound MQTT) and enforces the four legacy event-detection
+  rules:
+  - **Rule 1 (Block)** — drop a fired event if a higher-priority type
+    is already armed for the same `(device, sensor)`.
+  - **Rule 2 (Preempt)** — a new higher-priority fire clears any armed
+    lower-priority timers on the same sensor; the lower types re-arm
+    cleanly after the higher one resolves.
+  - **Rule 3 (Merge)** — duplicates of an already-armed type are
+    swallowed inside the TTL window.
+  - **Rule 4 (Arm)** — record `(triggered_at, ttl)` and forward
+    NOTHING yet; the held event forwards once
+    `triggered_at + ttl_seconds` elapses, after which the existing
+    9 s post-window fence on `DbEventSink` adds the second phase.
+
+  Priority order matches the legacy contract: `A < B < C < D`.
+  `BREAK` events bypass the gate entirely so wire-break / sensor-
+  disconnect alarms remain visible. Without this, a sustained
+  out-of-band signal triggers an event on every sample and the
+  event log fills with hundreds of duplicates per second.
+- **`Settings.event_ttl_seconds`** (default `5.0`) makes the dedup
+  window deployment-tunable.
+- **`IngestPipeline.stop()`** now calls `TtlGateSink.flush()` before
+  tearing down MQTT/DB sinks so a graceful shutdown forwards any
+  held events instead of dropping a burst inside the dedup window.
+- **14 unit tests** (`tests/unit/test_ttl_gate.py`) covering all four
+  rules, BREAK bypass, per-(device, sensor) timer isolation,
+  flush-on-shutdown, zero-TTL degenerate config, and negative-TTL
+  rejection.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
 ## [0.1.0-alpha.12] — 2026-04-25
 
 ### Added
