@@ -101,7 +101,9 @@ async def test_put_type_c_rejects_inverted_thresholds(api_client: AsyncClient) -
         },
     )
     assert resp.status_code == 422
-    assert "threshold_lower" in resp.json()["detail"]
+    # Pydantic v2 errors land as a list of dicts on `detail`.
+    detail = resp.json()["detail"]
+    assert any("threshold_lower" in (e.get("msg") or "") for e in detail)
 
 
 @pytest.mark.db
