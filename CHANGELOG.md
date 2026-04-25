@@ -8,6 +8,48 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.14] — 2026-04-25
+
+### Performance — Layer 1 (single-process micro-opts)
+
+Bench result: **8 589 → 16 746 msg/s** and **103 k → 201 k samples/s**
+on the same hardware. ~2x throughput. Headroom on Pi 4 estimated at
+~5 500 msg/s vs. the 2 000 msg/s production target. No behavioural
+change — detection thresholds, event priority/dedup, MQTT topic
+shape, DB row shape, and API contracts are all bit-for-bit
+identical to alpha.13.
+
+### Changed
+
+- **`orjson`** replaces stdlib `json` on the ingest hot path. orjson
+  is 3-5x faster on the small JSON envelopes STM32 emits and returns
+  bytes directly, saving a UTF-8 encode for the outbound MQTT
+  publish. Three call-sites swapped:
+  - `services/hermes/ingest/main.py` — `_consume()` payload parse
+    (2 000/s)
+  - `services/hermes/detection/mqtt_sink.py` — outbound event publish
+  - `services/hermes/detection/encoding.py` — event-window
+    encode/decode written into `event_windows.encoding="json-utf8"`.
+    Output bytes are byte-identical to the prior stdlib output, so
+    rows written by alpha.13 and earlier still decode correctly.
+- **Dropped the per-sample `log.debug("sample_ingested", ...)` call**
+  in `_consume()`. Even at filtered debug level, structlog still pays
+  the bound-call + kwarg-build cost 24 000 times a second. The
+  `hermes_msgs_received_total` and `hermes_samples_processed_total`
+  Prometheus counters cover the same ground for debugging without
+  the runtime tax. Errors and warnings still log fully.
+- **Pre-bound hot-path attribute lookups to locals** in `_consume()`:
+  `_m.MSGS_RECEIVED_TOTAL`, `queue.get`, `parse_stm32_adc_payload`,
+  etc. Each lookup was previously a LOAD_GLOBAL + LOAD_ATTR per
+  call; locals collapse to a single LOAD_FAST. At 2 000 msg/s this
+  reclaims ~5–8 ms/s of interpreter overhead.
+
+### Added
+
+- **`orjson>=3.10`** as a runtime dependency.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
 ## [0.1.0-alpha.13] — 2026-04-25
 
 ### Added
