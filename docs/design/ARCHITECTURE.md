@@ -332,6 +332,7 @@ Route modules live under `services/hermes/api/routes/`:
 | `mqtt_brokers.py`  | `/api/mqtt-brokers/*` — broker registry; one row active at a time      |
 | `packages.py`      | `/api/packages/*` — config-package CRUD + clone (parameter-row copy)   |
 | `sessions.py`      | `/api/sessions/*` — session lifecycle (start/stop), audit log, /current |
+| `system_tunables.py` | `/api/system-tunables` — read-only system status + tunable knobs    |
 | `live.py`          | `/api/live/sse` — Server-Sent Events from `LiveDataHub`                |
 | `metrics.py`       | `/api/metrics` — Prometheus text-format exposition                     |
 | `health.py`        | `/api/health` — basic liveness + DB ping                               |

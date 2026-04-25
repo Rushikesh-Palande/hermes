@@ -228,3 +228,35 @@ export interface CurrentSessionsOut {
 	global_session: SessionOut | null;
 	local_sessions: SessionOut[];
 }
+
+// ─── System tunables (gap 8) ──────────────────────────────────────
+
+export type IngestMode = 'all' | 'shard' | 'live_only';
+export type TunableEditable = 'live' | 'restart' | 'via_other_route';
+
+export interface TunableField {
+	key: string;
+	value: unknown;
+	description: string;
+	editable: TunableEditable;
+	edit_hint: string | null;
+}
+
+export interface SystemStateOut {
+	version: string;
+	ingest_mode: IngestMode;
+	shard_count: number;
+	shard_index: number;
+	dev_mode: boolean;
+	log_format: string;
+	active_global_session_id: string | null;
+	active_local_session_count: number;
+	sessions_recording_count: number;
+	modbus_devices_active: number;
+	mqtt_devices_active: number;
+}
+
+export interface SystemTunablesOut {
+	state: SystemStateOut;
+	tunables: TunableField[];
+}
