@@ -48,6 +48,7 @@ from hermes.api.routes import (
     events,
     health,
     live_stream,
+    mqtt_brokers,
     offsets,
 )
 from hermes.api.routes import (
@@ -138,6 +139,7 @@ def create_app() -> FastAPI:
     app.include_router(devices.router, prefix="/api/devices", tags=["devices"])
     app.include_router(events.router, prefix="/api/events", tags=["events"])
     app.include_router(config.router, prefix="/api/config", tags=["config"])
+    app.include_router(mqtt_brokers.router, prefix="/api/mqtt-brokers", tags=["mqtt-brokers"])
     app.include_router(
         offsets.router,
         prefix="/api/devices/{device_id}/offsets",

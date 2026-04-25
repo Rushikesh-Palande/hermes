@@ -51,6 +51,7 @@ detection engine is enforced by golden-traffic regression tests.
 
 | Version              | Headline                                                              |
 | -------------------- | --------------------------------------------------------------------- |
+| `v0.1.0-alpha.18`    | MQTT broker config UI + Fernet at-rest password encryption            |
 | `v0.1.0-alpha.17`    | Mode switching (POWER_ON / STARTUP / BREAK) + BREAK event emission    |
 | `v0.1.0-alpha.16`    | Documentation overhaul: detailed README + ARCHITECTURE.md             |
 | `v0.1.0-alpha.15`    | Layer 3 multi-process shard mode + Postgres LISTEN/NOTIFY config sync |
@@ -72,7 +73,7 @@ nine areas where the rewrite must reach parity. Status:
 | 1   | Outbound MQTT event publish                    | ✅ Shipped (alpha.11)                    |
 | 2   | TTL gate (5 s dedup + priority + BREAK bypass) | ✅ Shipped (alpha.13)                    |
 | 3   | Mode switching (POWER_ON/STARTUP/BREAK)        | ✅ Shipped (alpha.17)                    |
-| 4   | MQTT broker config UI                          | ⏳ Pending (model exists, no UI)         |
+| 4   | MQTT broker config UI + Fernet at-rest crypto  | ✅ Shipped (alpha.18)                    |
 | 5   | Sessions UI (start/stop/attach package)        | ⏳ Pending                               |
 | 6   | Continuous-sample writer (`session_samples`)   | ⏳ Pending                               |
 | 7   | Modbus TCP support                             | ⏸ Deferred (only if Modbus HW present)  |

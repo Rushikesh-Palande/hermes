@@ -28,7 +28,8 @@
 		{ href: '/', label: 'Overview' },
 		{ href: '/devices', label: 'Devices' },
 		{ href: '/events', label: 'Events' },
-		{ href: '/config', label: 'Config' }
+		{ href: '/config', label: 'Config' },
+		{ href: '/mqtt-brokers', label: 'MQTT' }
 	];
 
 	function isActive(href: string): boolean {
