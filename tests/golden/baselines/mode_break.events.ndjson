@@ -1,3 +1,1 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:ddad60fef2ab9ce998f5f55049c023187965f7fa52e70a8e4778fd1743ac1c09
-size 180
+{"device_id": 1, "event_type": "BREAK", "metadata": {"break_duration_seconds": 0.5, "break_threshold": 20.0, "trigger_value": 10.0}, "sensor_id": 5, "triggered_at": 1700000000.5}
