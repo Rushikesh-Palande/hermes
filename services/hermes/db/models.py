@@ -26,6 +26,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Identity,
     Integer,
@@ -298,6 +299,38 @@ class EventWindow(Base):
     sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
     encoding: Mapped[str] = mapped_column(Text, nullable=False, default="zstd+delta-f32")
     data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+
+
+class SessionSample(Base):
+    """
+    One raw sensor reading written under an active session that has
+    ``record_raw_samples=true``. The hot-path writer (gap 6) batches
+    inserts via asyncpg COPY so the per-row cost stays bounded even
+    at the production rate of ~30k rows/sec.
+
+    No PK — TimescaleDB hypertables typically don't have one because
+    the chunk constraint plus the lookup index covers query patterns.
+    The ``session_samples_lookup`` index in 0003 (``session_id,
+    device_id, sensor_id, ts DESC``) is what queries hit.
+    """
+
+    __tablename__ = "session_samples"
+
+    # Composite "primary key" surrogate so SQLAlchemy is happy. The DB
+    # has no actual PK; this is purely for ORM bookkeeping when reading.
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sessions.session_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    device_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sensor_id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, primary_key=True)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("sensor_id BETWEEN 1 AND 12", name="session_samples_sensor_range"),
+    )
 
 
 class SensorOffset(Base):

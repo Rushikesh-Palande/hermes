@@ -65,6 +65,27 @@ EVENTS_PUBLISHED_TOTAL = Counter(
     ["event_type"],
 )
 
+# ─── session_samples writer (gap 6) ────────────────────────────────
+
+SESSION_SAMPLES_WRITTEN_TOTAL = Counter(
+    "hermes_session_samples_written_total",
+    "Raw sensor rows persisted to session_samples by the continuous-sample writer.",
+)
+
+SESSION_SAMPLES_DROPPED_TOTAL = Counter(
+    "hermes_session_samples_dropped_total",
+    (
+        "Raw sensor rows dropped before write because the writer queue "
+        "was full. Sustained drops indicate the DB can't keep up with "
+        "the input rate; investigate Postgres/Timescale write throughput."
+    ),
+)
+
+SESSION_SAMPLES_BATCHES_FLUSHED_TOTAL = Counter(
+    "hermes_session_samples_batches_flushed_total",
+    "COPY batches dispatched by the session-samples writer.",
+)
+
 # ─── Gauges — current state ────────────────────────────────────────
 
 CONSUME_QUEUE_DEPTH = Gauge(
@@ -75,6 +96,16 @@ CONSUME_QUEUE_DEPTH = Gauge(
 DB_WRITER_PENDING = Gauge(
     "hermes_db_writer_pending",
     "Pending events in the DbEventSink writer queue (post-detection, pre-DB write).",
+)
+
+SESSION_SAMPLES_QUEUE_DEPTH = Gauge(
+    "hermes_session_samples_queue_depth",
+    "Buffered raw sensor rows waiting to be flushed by the session-samples writer.",
+)
+
+SESSION_SAMPLES_RECORDING_ACTIVE = Gauge(
+    "hermes_session_samples_recording_active",
+    "1 if at least one active session has record_raw_samples=true, else 0.",
 )
 
 MQTT_CONNECTED = Gauge(
