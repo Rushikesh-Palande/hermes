@@ -462,7 +462,7 @@ wheels = [
 
 [[package]]
 name = "hermes"
-version = "0.1.0a14"
+version = "0.1.0a15"
 source = { editable = "." }
 dependencies = [
     { name = "aiosmtplib" },
