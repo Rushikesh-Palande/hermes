@@ -112,3 +112,14 @@ export interface OverridesOut {
 	devices: Record<string, Record<string, unknown>>;
 	sensors: SensorOverrideOut[];
 }
+
+export interface SensorOffsetOut {
+	sensor_id: number;
+	offset_value: number;
+	updated_at: string | null;
+}
+
+export interface DeviceOffsetsOut {
+	device_id: number;
+	offsets: SensorOffsetOut[];
+}

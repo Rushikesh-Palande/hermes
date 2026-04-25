@@ -11,7 +11,7 @@
 	import { goto } from '$app/navigation';
 	import { api, ApiError } from '$lib/api';
 	import LiveChart from '$lib/LiveChart.svelte';
-	import type { DeviceOut } from '$lib/types';
+	import type { DeviceOffsetsOut, DeviceOut, SensorOffsetOut } from '$lib/types';
 
 	const WINDOW_OPTIONS = [
 		{ label: '1 s', seconds: 1 },
@@ -26,6 +26,15 @@
 	let windowSeconds = $state(6);
 	let visibleSensors = $state(new Set<number>(ALL_SENSORS));
 
+	// Per-sensor offsets (calibration). The form values are bound to a
+	// dict keyed by sensor_id; saving writes them via the bulk PUT so
+	// missing sensors get cleared.
+	let offsets = $state<Record<number, number>>({});
+	let offsetsLoading = $state(true);
+	let offsetsError = $state<string | null>(null);
+	let offsetsSaving = $state(false);
+	let offsetsSaved = $state(false);
+
 	const deviceId = $derived(Number(page.params.device_id));
 
 	async function loadDevice() {
@@ -36,6 +45,60 @@
 			device = null;
 			loadError = e instanceof ApiError ? e.detail : 'request failed';
 		}
+	}
+
+	function offsetsFromList(list: SensorOffsetOut[]): Record<number, number> {
+		const out: Record<number, number> = {};
+		for (const row of list) {
+			out[row.sensor_id] = row.offset_value;
+		}
+		return out;
+	}
+
+	async function loadOffsets() {
+		offsetsLoading = true;
+		offsetsError = null;
+		try {
+			const body = await api.get<DeviceOffsetsOut>(
+				`/api/devices/${deviceId}/offsets`
+			);
+			offsets = offsetsFromList(body.offsets);
+		} catch (e) {
+			offsetsError = e instanceof ApiError ? e.detail : 'load failed';
+		} finally {
+			offsetsLoading = false;
+		}
+	}
+
+	async function saveOffsets() {
+		offsetsSaving = true;
+		offsetsError = null;
+		offsetsSaved = false;
+		// Build the bulk-PUT payload; drop zero-valued entries so the
+		// server resets their rows (matches "no override" semantics).
+		const body: Record<string, number> = {};
+		for (const [sid, v] of Object.entries(offsets)) {
+			if (typeof v === 'number' && v !== 0) {
+				body[sid] = v;
+			}
+		}
+		try {
+			const resp = await api.put<DeviceOffsetsOut>(
+				`/api/devices/${deviceId}/offsets`,
+				{ offsets: body }
+			);
+			offsets = offsetsFromList(resp.offsets);
+			offsetsSaved = true;
+			setTimeout(() => (offsetsSaved = false), 2000);
+		} catch (e) {
+			offsetsError = e instanceof ApiError ? e.detail : 'save failed';
+		} finally {
+			offsetsSaving = false;
+		}
+	}
+
+	function clearOffset(sid: number) {
+		offsets = { ...offsets, [sid]: 0 };
 	}
 
 	function toggleSensor(sid: number) {
@@ -53,7 +116,10 @@
 		visibleSensors = new Set();
 	}
 
-	onMount(loadDevice);
+	onMount(() => {
+		void loadDevice();
+		void loadOffsets();
+	});
 </script>
 
 <svelte:head>
@@ -181,5 +247,70 @@
 			{windowSeconds}
 			{visibleSensors}
 		/>
+	</section>
+
+	<section
+		class="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
+	>
+		<header class="mb-3 flex items-baseline justify-between">
+			<div>
+				<h2 class="text-sm font-medium uppercase tracking-wide text-neutral-500">
+					Sensor offsets
+				</h2>
+				<p class="mt-1 text-xs text-neutral-500">
+					Zero-point calibration. Ingest applies <code>corrected = raw − offset</code>
+					to every sample, hot-reloaded the moment you save.
+				</p>
+			</div>
+			<div class="flex items-center gap-3">
+				{#if offsetsSaved}
+					<span class="text-xs text-green-600 dark:text-green-400">Saved.</span>
+				{/if}
+				<button
+					type="button"
+					onclick={saveOffsets}
+					disabled={offsetsSaving || offsetsLoading}
+					class="rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white hover:bg-neutral-700 disabled:bg-neutral-400 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-300"
+				>
+					{offsetsSaving ? 'Saving…' : 'Save offsets'}
+				</button>
+			</div>
+		</header>
+
+		{#if offsetsError}
+			<p class="mb-3 rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-400">
+				{offsetsError}
+			</p>
+		{/if}
+
+		{#if offsetsLoading}
+			<p class="text-sm text-neutral-500">Loading…</p>
+		{:else}
+			<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+				{#each ALL_SENSORS as sid (sid)}
+					<label class="flex flex-col gap-1 text-sm">
+						<span class="font-mono text-xs text-neutral-500">S{sid}</span>
+						<div class="flex items-center gap-1">
+							<input
+								type="number"
+								step="0.01"
+								bind:value={offsets[sid]}
+								class="w-full rounded-md border border-neutral-300 bg-white px-2 py-1 font-mono dark:border-neutral-700 dark:bg-neutral-950"
+							/>
+							{#if offsets[sid]}
+								<button
+									type="button"
+									onclick={() => clearOffset(sid)}
+									title="Reset to 0"
+									class="text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
+								>
+									×
+								</button>
+							{/if}
+						</div>
+					</label>
+				{/each}
+			</div>
+		{/if}
 	</section>
 {/if}
