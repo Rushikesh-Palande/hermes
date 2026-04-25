@@ -23,9 +23,10 @@ Lifecycle:
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from typing import TYPE_CHECKING
+
+import orjson
 
 from hermes import metrics as _m
 from hermes.detection.types import DetectedEvent
@@ -80,9 +81,11 @@ class MqttEventSink:
 
         # paho's publish is sync but non-blocking — enqueues onto its
         # output thread. retain=False matches the legacy default.
+        # orjson.dumps returns bytes directly — paho accepts bytes or
+        # str, and bytes saves a UTF-8 encode step.
         info = self._client.publish(
             topic,
-            json.dumps(payload, separators=(",", ":")),
+            orjson.dumps(payload),
             qos=self._qos,
         )
         # paho's MQTTMessageInfo carries an rc; non-zero means the local
