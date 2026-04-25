@@ -1,6 +1,6 @@
 [project]
 name = "hermes"
-version = "0.1.0a17"
+version = "0.1.0a18"
 description = "HERMES sensor dashboard — industrial STM32 monitoring, detection engine, and operator UI."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,6 +21,10 @@ dependencies = [
   # Auth
   "argon2-cffi>=23.1",
   "pyjwt>=2.10",
+  # Symmetric at-rest encryption (Fernet) for stored secrets like the
+  # MQTT broker password. Key is derived from HERMES_JWT_SECRET with a
+  # domain separator — see services/hermes/auth/secret_box.py.
+  "cryptography>=43.0",
   # MQTT
   "paho-mqtt>=2.1",
   # JSON — orjson is the production JSON path (3-5x faster than stdlib

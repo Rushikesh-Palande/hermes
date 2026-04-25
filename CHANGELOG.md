@@ -8,6 +8,72 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.18] — 2026-04-25
+
+### Operator UI — gap 4 (MQTT broker config + at-rest password encryption)
+
+The `mqtt_brokers` table existed since alpha.5 but had no API or UI;
+this lands both. The partial unique index `mqtt_brokers_one_active`
+(migration 0002) is preserved end-to-end — at most one row may have
+`is_active=TRUE`, enforced by the route layer issuing a deactivate-
+others UPDATE inside the same transaction whenever a row flips
+active.
+
+### Added
+
+- **`/api/mqtt-brokers/*` CRUD** in
+  `services/hermes/api/routes/mqtt_brokers.py`. Endpoints:
+  `GET /api/mqtt-brokers` (list, ordered by `broker_id`),
+  `POST /api/mqtt-brokers` (create — auto-deactivates other rows),
+  `GET /api/mqtt-brokers/{id}`, `PATCH /api/mqtt-brokers/{id}`
+  (partial update with documented password semantics),
+  `DELETE /api/mqtt-brokers/{id}`,
+  `POST /api/mqtt-brokers/{id}/activate` (atomic activate; idempotent).
+- **`hermes.auth.secret_box`** — at-rest symmetric encryption for
+  operator-typed secrets, currently the MQTT broker password.
+  `cryptography.Fernet` (AES-128-CBC + HMAC-SHA256 + versioned token)
+  with the key derived from `HERMES_JWT_SECRET` via HKDF-SHA256 with
+  a domain separator (`hermes/secret_box/v1`). One secret to manage
+  for ops; rotating `HERMES_JWT_SECRET` invalidates every active
+  session AND forces re-entry of stored broker passwords — same
+  "reset everything" mental model. Plaintext is NEVER returned by
+  any API response; the response shape carries a `has_password: bool`
+  flag instead.
+- **SvelteKit `/mqtt-brokers` page** in
+  `ui/src/routes/mqtt-brokers/+page.svelte`. SvelteKit 5 + runes,
+  uses the existing `$lib/api` wrapper. Add-broker form
+  (host / port / username / password / use_tls / is_active) +
+  per-row Activate/Deactivate, Set password, Clear password, and
+  Delete actions. Top-nav adds an "MQTT" item.
+- **`MqttBrokerOut`, `MqttBrokerIn`, `MqttBrokerPatch`** TypeScript
+  interfaces in `ui/src/lib/types.ts`.
+- **23 new tests**: 7 unit (`tests/unit/test_secret_box.py` —
+  round-trip, unicode/empty edge cases, no-plaintext-leak,
+  IV randomness, tampering raises, singleton caching) + 16
+  integration (`tests/integration/test_mqtt_brokers_api.py` —
+  full CRUD coverage, activation invariant, password write semantics
+  end-to-end through the DB row, 404/204 lifecycle).
+
+### Changed
+
+- **`pyproject.toml`** adds `cryptography>=43.0` as a runtime dep.
+- **`services/hermes/api/main.py`** registers the new router under
+  `/api/mqtt-brokers`.
+
+### Out of scope (deliberate, called out in the UI)
+
+Live broker switchover. The ingest reads broker config from the
+`MQTT_*` env vars at process start; flipping `is_active` does NOT
+reconnect a running paho client. After activating a different broker,
+operators must `systemctl restart hermes-ingest`. The UI's amber
+banner says so explicitly. A future release will close the gap with
+`LISTEN`/`NOTIFY` + `paho.disconnect/connect`, mirroring the
+alpha.15 config-sync pattern.
+
+Total tests now: 170 unit + 84 integration = 254 passing.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
 ## [0.1.0-alpha.17] — 2026-04-25
 
 ### Detection — gap 3 (mode switching + BREAK event emission)
