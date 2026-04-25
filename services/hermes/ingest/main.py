@@ -52,6 +52,7 @@ from typing import Any
 import paho.mqtt.client as mqtt
 from sqlalchemy import select
 
+from hermes import metrics as _m
 from hermes.config import Settings, get_settings
 from hermes.db.engine import async_session, dispose_engine
 from hermes.db.models import SensorOffset
@@ -113,35 +114,53 @@ async def _consume(
         except TimeoutError:
             continue
 
+        # Update queue depth gauge after each successful dequeue. Cheap;
+        # ``qsize`` is O(1) on asyncio.Queue.
+        _m.CONSUME_QUEUE_DEPTH.set(queue.qsize())
+
         try:
-            payload: dict[str, Any] = json.loads(raw_bytes)
+            with _m.time_stage("parse"):
+                payload: dict[str, Any] = json.loads(raw_bytes)
         except json.JSONDecodeError:
+            _m.MSGS_INVALID_TOTAL.inc()
             log.warning("mqtt_bad_json", size=len(raw_bytes))
             continue
 
         device_id: int = int(payload.get("device_id", 1))
+        device_label = str(device_id)
+        _m.MSGS_RECEIVED_TOTAL.labels(device_id=device_label).inc()
 
         # --- Timestamp anchoring ---
         dev_ts_ms = payload.get("ts")
-        if dev_ts_ms is not None:
-            ts = clocks.anchor(device_id, receive_ts, float(dev_ts_ms) / 1000.0)
-        else:
-            ts = receive_ts
+        with _m.time_stage("anchor"):
+            if dev_ts_ms is not None:
+                ts = clocks.anchor(device_id, receive_ts, float(dev_ts_ms) / 1000.0)
+            else:
+                ts = receive_ts
 
         # --- Parse ADC channels ---
-        sensor_values = parse_stm32_adc_payload(payload)
+        with _m.time_stage("adc_parse"):
+            sensor_values = parse_stm32_adc_payload(payload)
         if not sensor_values:
             continue
 
         # --- Apply per-sensor calibration offsets ---
-        sensor_values = offsets.apply(device_id, sensor_values)
+        with _m.time_stage("offset"):
+            sensor_values = offsets.apply(device_id, sensor_values)
 
         # --- Feed live ring buffer (SSE) and window buffer (event capture) ---
-        live.push(device_id, ts, sensor_values)
-        window_buffer.push_snapshot(device_id, ts, sensor_values)
+        with _m.time_stage("buffers"):
+            live.push(device_id, ts, sensor_values)
+            window_buffer.push_snapshot(device_id, ts, sensor_values)
+
+        # Counter ticks once per sensor reading actually fed into the
+        # pipeline. Same labelling as MSGS_RECEIVED_TOTAL so a Grafana
+        # join is straightforward.
+        _m.SAMPLES_PROCESSED_TOTAL.labels(device_id=device_label).inc(len(sensor_values))
 
         # --- Feed detection engine ---
-        detection.feed_snapshot(device_id, ts, sensor_values)
+        with _m.time_stage("detect"):
+            detection.feed_snapshot(device_id, ts, sensor_values)
 
         log.debug(
             "sample_ingested",
@@ -250,9 +269,11 @@ class IngestPipeline:
                     host=settings.mqtt_host,
                     port=settings.mqtt_port,
                 )
+                _m.MQTT_CONNECTED.set(1)
                 client.subscribe(settings.mqtt_topic_adc, qos=0)
             else:
                 log.error("mqtt_connect_failed", reason_code=reason_code)
+                _m.MQTT_CONNECTED.set(0)
 
         def on_disconnect(
             _client: mqtt.Client,
@@ -261,6 +282,7 @@ class IngestPipeline:
             _props: Any = None,
         ) -> None:
             log.warning("mqtt_disconnected", reason_code=reason_code)
+            _m.MQTT_CONNECTED.set(0)
 
         def on_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage) -> None:
             receive_ts = time.time()

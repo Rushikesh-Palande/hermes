@@ -8,6 +8,40 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.12] — 2026-04-25
+
+### Added
+
+- **Prometheus metrics** wired through the ingest + detection hot path.
+  New `services/hermes/metrics.py` defines counters, gauges, and
+  histograms on the prometheus_client default registry:
+  `hermes_msgs_received_total{device_id}`,
+  `hermes_msgs_invalid_total`,
+  `hermes_samples_processed_total{device_id}`,
+  `hermes_events_detected_total{event_type,device_id}`,
+  `hermes_events_persisted_total{event_type}`,
+  `hermes_events_published_total{event_type}`,
+  `hermes_consume_queue_depth`,
+  `hermes_db_writer_pending`,
+  `hermes_mqtt_connected`,
+  `hermes_pipeline_stage_duration_seconds{stage}` (sampled 1/100).
+- **`GET /api/metrics`** endpoint returns standard Prometheus
+  text-format. Unauthenticated by design — firewall / nginx in front.
+- **Throughput benchmark** (`tests/bench/test_throughput.py`,
+  marker `bench`). Pre-fills the asyncio handoff queue with 2 000
+  synthetic payloads (= 1 s of production load) and times the
+  consumer drain. Asserts no silent drops and a wall-clock budget.
+  Local-laptop run: **8 589 msg/s, ~103 k samples/s — 4× the
+  production target**. Now runs as a dedicated CI step so any future
+  perf regression fails the build.
+
+### Changed
+
+- CI workflow now has three `pytest` steps: unit (excludes `db`,
+  `mqtt`, `bench`), integration (`-m db`), and bench (`-m bench`).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
 ## [0.1.0-alpha.11] — 2026-04-25
 
 ### Added
@@ -346,7 +380,8 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
   CODE_OF_CONDUCT, CODEOWNERS, issue and PR templates, Dependabot config,
   `.gitignore`, `.gitattributes`, `.editorconfig`.
 
-[Unreleased]:      https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.11...HEAD
+[Unreleased]:      https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.12...HEAD
+[0.1.0-alpha.12]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.11...v0.1.0-alpha.12
 [0.1.0-alpha.11]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.10...v0.1.0-alpha.11
 [0.1.0-alpha.10]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.9...v0.1.0-alpha.10
 [0.1.0-alpha.9]:   https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.8...v0.1.0-alpha.9

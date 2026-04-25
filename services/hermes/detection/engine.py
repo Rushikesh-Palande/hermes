@@ -24,6 +24,7 @@ land with mode switching in a later phase.
 
 from __future__ import annotations
 
+from hermes import metrics as _m
 from hermes.db.models import EventType
 from hermes.detection.config import DetectorConfigProvider
 from hermes.detection.type_a import TypeADetector
@@ -70,12 +71,17 @@ class DetectionEngine:
         sequence and Type D (once added) reads Type C's ``current_avg``
         for the same sample.
         """
+        device_label = str(device_id)
         for sensor_id, value in values.items():
             sample = Sample(ts=ts, device_id=device_id, sensor_id=sensor_id, value=value)
             for event_type in _EVENT_TYPE_ORDER:
                 detector = self._detector_for(device_id, sensor_id, event_type)
                 event = detector.feed(sample)
                 if event is not None:
+                    _m.EVENTS_DETECTED_TOTAL.labels(
+                        event_type=event_type.value,
+                        device_id=device_label,
+                    ).inc()
                     self._sink.publish(event)
 
     def reset_device(self, device_id: int) -> None:
