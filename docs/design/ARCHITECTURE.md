@@ -448,7 +448,7 @@ deliberately rather than write twice" — see the docstring there.
 | Unit         | `tests/unit/`         | none    | every PR, every push                    |
 | Integration  | `tests/integration/`  | `db`    | every PR (CI Postgres service)          |
 | Bench        | `tests/bench/`        | `bench` | every PR (asserts no perf regression)   |
-| Golden       | `tests/golden/`       | `golden`| (planned) every PR touching detection   |
+| Golden       | `tests/golden/`       | `golden` | shipped alpha.23 — synthetic corpora + baselines; real captures pending |
 
 ### 7.2 Quality gate
 

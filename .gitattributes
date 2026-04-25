@@ -39,10 +39,16 @@ Makefile*      text eol=lf
 *.deb          binary
 *.whl          binary
 
-# Large golden-traffic captures — Git LFS
-tests/golden/**/*.ndjson   filter=lfs diff=lfs merge=lfs -text
-tests/golden/**/*.tar.zst  filter=lfs diff=lfs merge=lfs -text
-tests/golden/**/*.sqlite   filter=lfs diff=lfs merge=lfs -text
+# Large golden-traffic captures — Git LFS.
+#
+# Only the per-capture artefacts (real production-hardware captures
+# at ~30 MB compressed each, see GOLDEN_TRAFFIC_PLAN.md §1.2) go to
+# LFS. The synthetic corpora and baselines under
+# tests/golden/{corpora,baselines}/ are small (kB-sized) and stay as
+# plain text in git so CI can read them without `git lfs pull`.
+tests/golden/captures/**/*.ndjson   filter=lfs diff=lfs merge=lfs -text
+tests/golden/captures/**/*.tar.zst  filter=lfs diff=lfs merge=lfs -text
+tests/golden/captures/**/*.sqlite   filter=lfs diff=lfs merge=lfs -text
 
 # GitHub language detection hints
 docs/**        linguist-documentation
