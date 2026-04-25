@@ -75,16 +75,12 @@ jobs:
   # ─── 1. Debian packages ─────────────────────────────────────────
 
   build-deb:
-    name: Build .deb (${{ matrix.arch }})
+    # Single job, no matrix: the package is Architecture: all (pure
+    # Python source + a JS bundle), so one .deb works on amd64 and
+    # arm64 hosts. The platform-specific Python venv is built at
+    # install time from the host's libc / glibc by install.sh.
+    name: Build .deb
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            runner_arch: x64
-          - arch: arm64
-            runner_arch: arm64   # used only by the QEMU notice below
     steps:
       - uses: actions/checkout@v4
         with:
@@ -108,12 +104,6 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "deb_version=$DEB_VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Set up cross-arch QEMU (arm64 only)
-        if: matrix.arch == 'arm64'
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
       - name: Sync debian/changelog with the tag
         run: |
           # Emit a top-line entry matching this tag so dpkg-buildpackage
@@ -136,12 +126,14 @@ jobs:
 
       - name: Install build deps
         run: |
+          # debhelper-only build deps; we don't pull dh-python because
+          # debian/rules opts out of Python detection with --without
+          # python3 (the venv is built at install time on the host).
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            debhelper devscripts dh-python \
-            python3-all python3-venv \
+            debhelper devscripts \
             ca-certificates curl gnupg
-          # Node + pnpm for the UI build that debian/rules invokes
+          # Node + pnpm for the UI build that debian/rules invokes.
           curl -fsSL https://nodejs.org/dist/v20.18.0/node-v20.18.0-linux-x64.tar.xz \
             | sudo tar -xJ -C /opt
           sudo ln -sf /opt/node-v20.18.0-linux-x64/bin/node /usr/local/bin/node
@@ -173,7 +165,7 @@ jobs:
       - name: Upload .deb artefact
         uses: actions/upload-artifact@v4
         with:
-          name: deb-${{ matrix.arch }}
+          name: deb
           path: dist/*.deb
           if-no-files-found: error
           retention-days: 7

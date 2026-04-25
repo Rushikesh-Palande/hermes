@@ -10,8 +10,14 @@
 #     dpkg-buildpackage -us -uc -b
 # Output appears one directory up: hermes_X.Y.Z_amd64.deb
 
+# --without python3 disables dh-python's auto-detection of pyproject.toml.
+# Without this, dh tries to run `pybuild` against hatchling at .deb build
+# time, which fails because we don't pre-install hatchling on the runner
+# and we deliberately don't want a wheel built here — the venv is built
+# at install time on the target host (via debian/postinst → install.sh)
+# so it picks up host-specific platform wheels.
 %:
-	dh $@
+	dh $@ --without python3
 
 override_dh_auto_build:
 	# Pre-build the SvelteKit bundle so the .deb ships a static UI.
@@ -19,9 +25,8 @@ override_dh_auto_build:
 	cd ui && pnpm install --frozen-lockfile && pnpm build
 
 override_dh_auto_install:
-	# Stage the source tree under /opt/hermes/ in the build root.
-	# debhelper handles installing files matched by debian/install.
-	dh_auto_install
+	# No-op. debian/install lists every source path that ships in the
+	# .deb; dh_install (run after this hook) does the actual placement.
 
 override_dh_auto_test:
 	# Skip dh_auto_test — we run pytest in CI, not at .deb build time.

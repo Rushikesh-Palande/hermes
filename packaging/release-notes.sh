@@ -91,10 +91,12 @@ your host. Full walkthrough: [\`docs/operations/INSTALLATION.md\`](https://githu
 
 ### Path A — one-shot installer (recommended for Pi 4 / Linux box)
 
-Download the \`.deb\` for your architecture from the [Assets](#-assets) below, then:
+Download the \`.deb\` from the [Assets](#-assets) below — one file works
+on amd64 and arm64 (the package is architecture-independent; the
+platform-specific Python venv is built at install time):
 
 \`\`\`bash
-sudo dpkg -i hermes_${VERSION}_amd64.deb
+sudo dpkg -i hermes_${VERSION}_all.deb
 sudo apt install -f                # resolve declared Depends from apt
 \`\`\`
 
@@ -167,10 +169,9 @@ Every aspect of the rewrite is documented under [\`docs/\`](https://github.com/R
 
 The workflow attaches the following artefacts to this release:
 
-- \`hermes_${VERSION}_amd64.deb\` — Debian package, x86_64
-- \`hermes_${VERSION}_arm64.deb\` — Debian package, ARM64 (Pi 4)
+- \`hermes_${VERSION}_all.deb\` — Debian package (architecture-independent;
+  works on amd64 and arm64)
 - \`hermes-${VERSION}-amd64-offline.tar.gz\` — offline install bundle, x86_64
-- \`hermes-${VERSION}-arm64-offline.tar.gz\` — offline install bundle, ARM64
 - \`SHA256SUMS\` — checksums for all of the above
 
 Container image:
