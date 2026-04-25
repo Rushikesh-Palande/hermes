@@ -51,6 +51,7 @@ detection engine is enforced by golden-traffic regression tests.
 
 | Version              | Headline                                                              |
 | -------------------- | --------------------------------------------------------------------- |
+| `v0.1.0-alpha.19`    | Sessions + Packages API + UI (lifecycle, audit log, package cloning)  |
 | `v0.1.0-alpha.18`    | MQTT broker config UI + Fernet at-rest password encryption            |
 | `v0.1.0-alpha.17`    | Mode switching (POWER_ON / STARTUP / BREAK) + BREAK event emission    |
 | `v0.1.0-alpha.16`    | Documentation overhaul: detailed README + ARCHITECTURE.md             |
@@ -74,7 +75,7 @@ nine areas where the rewrite must reach parity. Status:
 | 2   | TTL gate (5 s dedup + priority + BREAK bypass) | ✅ Shipped (alpha.13)                    |
 | 3   | Mode switching (POWER_ON/STARTUP/BREAK)        | ✅ Shipped (alpha.17)                    |
 | 4   | MQTT broker config UI + Fernet at-rest crypto  | ✅ Shipped (alpha.18)                    |
-| 5   | Sessions UI (start/stop/attach package)        | ⏳ Pending                               |
+| 5   | Sessions UI (start/stop/attach package)        | ✅ Shipped (alpha.19)                    |
 | 6   | Continuous-sample writer (`session_samples`)   | ⏳ Pending                               |
 | 7   | Modbus TCP support                             | ⏸ Deferred (only if Modbus HW present)  |
 | 8   | System-tunables UI                             | ⏳ Pending                               |

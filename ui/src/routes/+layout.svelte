@@ -28,6 +28,7 @@
 		{ href: '/', label: 'Overview' },
 		{ href: '/devices', label: 'Devices' },
 		{ href: '/events', label: 'Events' },
+		{ href: '/sessions', label: 'Sessions' },
 		{ href: '/config', label: 'Config' },
 		{ href: '/mqtt-brokers', label: 'MQTT' }
 	];
