@@ -98,3 +98,17 @@ export interface HealthResponse {
 	status: string;
 	version: string;
 }
+
+export type DetectorTypeName = 'type_a' | 'type_b' | 'type_c' | 'type_d';
+
+export interface SensorOverrideOut {
+	device_id: number;
+	sensor_id: number;
+	config: Record<string, unknown>;
+}
+
+export interface OverridesOut {
+	/** device_id (as a string key) → config object */
+	devices: Record<string, Record<string, unknown>>;
+	sensors: SensorOverrideOut[];
+}

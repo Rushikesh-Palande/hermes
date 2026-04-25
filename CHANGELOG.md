@@ -8,6 +8,32 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.6] — 2026-04-25
+
+### Added
+
+- **Per-device + per-sensor detector config overrides (Phase 5b)**:
+  `DbConfigProvider.reload()` now reads every `parameters` row and
+  builds three caches (global / device / sensor). `type_X_for(device_id,
+  sensor_id)` walks SENSOR → DEVICE → GLOBAL and returns the first hit.
+  Override rows store full configs, not deltas (matches legacy
+  per-sensor behaviour).
+- Five new endpoints on `/api/config/{type}/overrides`:
+  list, PUT/DELETE per-device, PUT/DELETE per-sensor — type is a path
+  param, factored over `Literal["type_a", …, "type_d"]` so the
+  handlers don't repeat per detector. Every mutation hot-reloads the
+  live provider and resets cached detectors.
+- Config page now renders an "Overrides" panel under each tab with
+  per-device and per-sensor tables and "+ Save as device override" /
+  "+ Save as sensor override" buttons that PUT the current form's
+  values to the requested scope.
+
+### Changed
+
+- Type C's `threshold_lower < threshold_upper` check moved from the
+  Type C global-PUT handler to a `model_validator` on the Pydantic
+  `TypeCIn` model so it applies uniformly at GLOBAL / DEVICE / SENSOR.
+
 ## [0.1.0-alpha.5] — 2026-04-25
 
 ### Added
@@ -170,7 +196,8 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
   CODE_OF_CONDUCT, CODEOWNERS, issue and PR templates, Dependabot config,
   `.gitignore`, `.gitattributes`, `.editorconfig`.
 
-[Unreleased]:     https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.5...HEAD
+[Unreleased]:     https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.6...HEAD
+[0.1.0-alpha.6]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.5...v0.1.0-alpha.6
 [0.1.0-alpha.5]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.4...v0.1.0-alpha.5
 [0.1.0-alpha.4]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.3...v0.1.0-alpha.4
 [0.1.0-alpha.3]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.2...v0.1.0-alpha.3
