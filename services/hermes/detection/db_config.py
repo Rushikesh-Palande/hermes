@@ -42,6 +42,7 @@ from sqlalchemy import select
 from hermes.db.engine import async_session
 from hermes.db.models import Parameter, ParameterScope
 from hermes.detection.config import (
+    ModeSwitchingConfig,
     TypeAConfig,
     TypeBConfig,
     TypeCConfig,
@@ -67,6 +68,7 @@ KEY_TYPE_A = "type_a.config"
 KEY_TYPE_B = "type_b.config"
 KEY_TYPE_C = "type_c.config"
 KEY_TYPE_D = "type_d.config"
+KEY_MODE_SWITCHING = "mode_switching.config"
 
 # Map detector key → dataclass type. Used by both ``reload()`` (decode)
 # and the API layer (validation when accepting overrides).
@@ -75,6 +77,7 @@ KEY_TO_CLS: dict[str, type] = {
     KEY_TYPE_B: TypeBConfig,
     KEY_TYPE_C: TypeCConfig,
     KEY_TYPE_D: TypeDConfig,
+    KEY_MODE_SWITCHING: ModeSwitchingConfig,
 }
 
 
@@ -86,6 +89,7 @@ class _ConfigCache:
     type_b: TypeBConfig
     type_c: TypeCConfig
     type_d: TypeDConfig
+    mode_switching: ModeSwitchingConfig
 
 
 class DbConfigProvider:
@@ -109,6 +113,7 @@ class DbConfigProvider:
             type_b=TypeBConfig(),
             type_c=TypeCConfig(),
             type_d=TypeDConfig(),
+            mode_switching=ModeSwitchingConfig(),
         )
         # device_id → _ConfigCache. None = no device override for that key.
         self._devices: dict[int, _ConfigCache] = {}
@@ -258,6 +263,9 @@ class DbConfigProvider:
     def type_d_for(self, device_id: int, sensor_id: int) -> TypeDConfig:
         return self._cache_for(device_id, sensor_id).type_d
 
+    def mode_switching_for(self, device_id: int, sensor_id: int) -> ModeSwitchingConfig:
+        return self._cache_for(device_id, sensor_id).mode_switching
+
     # ─── Override introspection (used by /api/config/overrides) ────
 
     @property
@@ -307,6 +315,7 @@ def _build_cache(by_key: dict[str, Any]) -> _ConfigCache:
         type_b=_decode_or_default(by_key.get(KEY_TYPE_B), TypeBConfig),
         type_c=_decode_or_default(by_key.get(KEY_TYPE_C), TypeCConfig),
         type_d=_decode_or_default(by_key.get(KEY_TYPE_D), TypeDConfig),
+        mode_switching=_decode_or_default(by_key.get(KEY_MODE_SWITCHING), ModeSwitchingConfig),
     )
 
 

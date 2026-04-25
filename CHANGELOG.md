@@ -8,6 +8,99 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.17] — 2026-04-25
+
+### Detection — gap 3 (mode switching + BREAK event emission)
+
+Implements the per-(device, sensor) `POWER_ON` / `STARTUP` / `BREAK`
+state machine specified by `EVENT_DETECTION_CONTRACT.md` §2.3 / §7.
+**Default behaviour is unchanged** — mode switching is opt-in via the
+`mode_switching.config` parameter row. `enabled=False` is the default,
+matching the legacy `mode_switching_enabled` knob, so existing
+deployments behave bit-for-bit identically to alpha.16 until the
+operator turns it on.
+
+### Added
+
+- **`ModeStateMachine`** in
+  `services/hermes/detection/mode_switching.py`. Faithful port of the
+  legacy state machine at `event_detector.py:855-955` with the same
+  three modes, the same six per-sensor timestamps, and the same
+  asymmetric grace-window behaviour:
+  - `POWER_ON → STARTUP` on `value > startup_threshold` sustained for
+    `startup_duration_seconds`. Transient dips lasting less than
+    `startup_reset_grace_s` (default 1.0 s) are forgiven; sustained
+    drops reset the timer.
+  - `STARTUP → BREAK` on `value < break_threshold` sustained for
+    `break_duration_seconds`. Emits a BREAK event with `triggered_at`
+    set to the FIRST below-threshold sample's wall time — NOT the
+    duration boundary. Operators have alarms wired to that earlier
+    timestamp; preserving it is a hard contract invariant.
+  - `BREAK → STARTUP` recovery uses the same condition as POWER_ON →
+    STARTUP. Does NOT emit a new BREAK event.
+- **`ModeSwitchingConfig`** dataclass in
+  `services/hermes/detection/config.py`: `enabled`, `startup_threshold`,
+  `break_threshold`, `startup_duration_seconds`,
+  `break_duration_seconds`, `startup_reset_grace_s`. Added to the
+  `DetectorConfigProvider` protocol via `mode_switching_for(device, sensor)`.
+- **`KEY_MODE_SWITCHING = "mode_switching.config"`** parameter key in
+  `DbConfigProvider`, plus `_ConfigCache.mode_switching` so the SENSOR →
+  DEVICE → GLOBAL scope walk resolves overrides for mode switching the
+  same way it does for Type A/B/C/D.
+- **17 new unit tests**:
+  - `tests/unit/test_mode_switching.py` (11) — disabled short-circuit,
+    every state transition, grace-window asymmetry, per-(device, sensor)
+    isolation, `reset_device` semantics, BREAK metadata.
+  - `tests/unit/test_engine_mode_gating.py` (6) — engine integration:
+    BREAK reaches the sink, recovery doesn't double-fire, disabled
+    mode-switching default keeps detection firing, gating suppresses
+    Type A events when not active.
+
+### Changed
+
+- **`DetectionEngine.feed_snapshot`** now consults the mode state
+  machine for every sensor on every sample. Gating semantics:
+  - Type A still feeds the running-sum state on every sample so its
+    variance window stays primed, but events are dropped when the
+    sensor is not active. Window comes back hot the moment the sensor
+    enters STARTUP.
+  - Types B/C/D are skipped entirely while not active. Their internal
+    windows re-prime after the next STARTUP entry.
+  - BREAK events emitted by the state machine are published directly
+    to the sink. The TtlGateSink's BREAK-bypass arm (alpha.13) needed
+    no changes — BREAK still flows straight through to durable sinks.
+- **`DetectionEngine.reset_device`** now also resets the mode state
+  machine for that device, so a config reload puts every sensor back
+  in `POWER_ON` (matching the legacy fresh-process behaviour).
+- **Hot-loop pre-binding** (Layer 1 discipline applied to detection):
+  `DetectionEngine.feed_snapshot` now pre-binds `mode_feed`,
+  `detector_for`, `sink_publish`, `events_detected`, `type_a_const`,
+  `break_label`, and `type_order` to locals before the per-sensor
+  loop. Saves a measurable amount of LOAD_GLOBAL+LOAD_ATTR overhead
+  at 24 000 samples/s.
+- **Singleton ModeDecision instances** for the no-event paths
+  (`_DECISION_ACTIVE` / `_DECISION_INACTIVE`) so the steady-state hot
+  path doesn't allocate a fresh dataclass per sample.
+
+### Performance impact
+
+The bench median dropped from ~17 100 msg/s (alpha.16) to ~14 000
+msg/s with high run-to-run variance (10 200 - 16 100 across five runs
+on the same machine). On Pi 4 (~3× slower): estimated ~4 500 msg/s
+median vs. the 2 000 msg/s production target — still ~2.25× headroom.
+The cost is the price of correctness; running detection on inactive
+sensors would have been worse than a few thousand fewer msg/s.
+
+### Cross-shard config sync
+
+Mode-switching config rides the existing Postgres `LISTEN`/`NOTIFY`
+plumbing from alpha.15. Adding a new parameter key was a one-line
+addition to `KEY_TO_CLS` in `db_config.py`; the `pg_notify`-driven
+reload + reset propagates mode-switching changes to every detection
+shard automatically.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
 ## [0.1.0-alpha.16] — 2026-04-25
 
 ### Documentation overhaul

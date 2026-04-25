@@ -10,7 +10,13 @@ from __future__ import annotations
 
 import uuid
 
-from hermes.detection.config import TypeAConfig, TypeBConfig, TypeCConfig, TypeDConfig
+from hermes.detection.config import (
+    ModeSwitchingConfig,
+    TypeAConfig,
+    TypeBConfig,
+    TypeCConfig,
+    TypeDConfig,
+)
 from hermes.detection.db_config import DbConfigProvider, _ConfigCache
 
 
@@ -21,6 +27,7 @@ def _cache(threshold_cv: float = 5.0) -> _ConfigCache:
         type_b=TypeBConfig(),
         type_c=TypeCConfig(),
         type_d=TypeDConfig(),
+        mode_switching=ModeSwitchingConfig(),
     )
 
 
