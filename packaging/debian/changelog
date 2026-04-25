@@ -1,0 +1,7 @@
+hermes (0.1.0~alpha.26-1) unstable; urgency=medium
+
+  * .deb packaging scaffolding (control, rules, postinst, postrm,
+    copyright, install). On install, runs packaging/install.sh
+    automatically to bring up the database, secrets, and services.
+
+ -- EmbedSquare <ops@embedsquare.com>  Sun, 26 Apr 2026 12:00:00 +0000

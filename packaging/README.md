@@ -2,49 +2,133 @@
 
 Production deployment artefacts for HERMES.
 
-## Current state
+> **For end-user "how do I install this on my Linux box?" answer:**
+> see [`../docs/operations/INSTALLATION.md`](../docs/operations/INSTALLATION.md).
+> This README documents the *contents* of `packaging/`; INSTALLATION.md
+> walks through *using* it.
 
-| Subdirectory          | State           | Purpose                                                          |
-| --------------------- | --------------- | ---------------------------------------------------------------- |
-| [`systemd/`](./systemd/) | ✅ Shipped (alpha.15) | Service units for single-process and multi-shard deployments |
-| `debian/`             | ⏳ Phase 9       | `.deb` build artefacts (control, rules, postinst, postrm)        |
-| `nginx/`              | ⏳ Phase 9       | TLS-terminating reverse-proxy config                             |
-| `logrotate/` (planned)| ⏳ Phase 9       | Rotation rules for `/var/log/hermes/*.log`                       |
-| `Dockerfile` (planned)| ⏳ Phase 9       | Multi-stage ARM64 + ARM32 build for development / cloud          |
+## Layout
 
-## systemd units (shipped)
+```
+packaging/
+├── README.md                     ← this file
+├── install.sh                    one-shot installer (Path A)
+├── uninstall.sh                  clean removal
+├── build-offline-bundle.sh       builds a self-contained .tar.gz (Path C)
+├── Dockerfile                    multi-stage container build (Path B)
+├── docker-compose.prod.yml       production compose stack (Path B)
+├── debian/                       proper Debian package metadata
+│   ├── control                   declares the .deb's deps + description
+│   ├── changelog                 release history (Debian format)
+│   ├── copyright                 license declaration
+│   ├── rules                     dpkg-buildpackage orchestration
+│   ├── install                   maps source paths → /opt/hermes/
+│   ├── postinst                  runs install.sh after dpkg unpacks
+│   └── postrm                    cleans up on remove/purge
+├── nginx/
+│   └── hermes.conf               TLS-ready reverse proxy site
+├── systemd/
+│   ├── hermes-api.service        FastAPI under systemd
+│   ├── hermes-ingest.service     single-process default
+│   ├── hermes-ingest@.service    multi-shard template (gap 3)
+│   └── hermes.target             aggregate
+├── offline/                      (created by build-offline-bundle.sh)
+│                                 .debs for offline install
+└── wheelhouse/                   (created by build-offline-bundle.sh)
+                                  Python wheels for offline install
+```
 
-The systemd unit files live in [`systemd/`](./systemd/):
+## Three install paths
 
-| Unit                          | Purpose                                                              |
-| ----------------------------- | -------------------------------------------------------------------- |
-| `hermes-api.service`          | FastAPI server. Switches between `mode=all` and `mode=live_only` via `/etc/hermes/api.env`. |
-| `hermes-ingest.service`       | Single-process default. `Conflicts=` the shard template so the two can't run together. |
-| `hermes-ingest@.service`      | Shard template. Each instance reads `HERMES_SHARD_INDEX=%i` from the systemd specifier. |
-| `hermes.target`               | Aggregate target — `systemctl start hermes.target` brings up the whole stack in dependency order. |
+| Path | Artifact | Best for |
+|------|----------|----------|
+| **A** | `install.sh` | Pi 4 / cloud VM with internet |
+| **B** | `Dockerfile` + `docker-compose.prod.yml` | "I have Docker" / cloud / dev |
+| **C** | `.tar.gz` from `build-offline-bundle.sh` + `install.sh --offline` | Air-gapped factory floor |
 
-See [`docs/design/MULTI_SHARD.md`](../docs/design/MULTI_SHARD.md) §7 for
-the step-by-step deployment and rollback procedures (single-process
-default vs 4-shard scaling).
+Detail in [`../docs/operations/INSTALLATION.md`](../docs/operations/INSTALLATION.md).
 
-## Why .deb and not Docker on the Pi
-
-- **Lower memory overhead.** Docker's overlay-fs + containerd add
-  ~150 MB resident memory; a Pi 4 with 2 GB RAM feels the difference.
-- **systemd native.** Restart policies, journal integration, unit
-  dependencies all work the standard Linux way.
-- **Offline installs.** Customers on air-gapped factory networks can
-  `dpkg -i hermes_X.Y.Z_arm64.deb` without a registry.
-
-A Docker image still exists for development and cloud deployments
-(via `docker-compose.dev.yml`); the `Dockerfile` here will build the
-same artefact for cloud targets but is not the primary production
-target.
-
-## Build commands (once Phase 9 lands)
+## Building a `.deb` package
 
 ```bash
-make deb          # builds hermes_X.Y.Z_arm64.deb
-make deb-armhf    # armhf / Pi 3 and earlier
-make docker       # multi-arch Docker image
+# On a Debian 12 (or later) build host with debhelper installed
+sudo apt install -y debhelper devscripts
+dpkg-buildpackage -us -uc -b
+# Output: ../hermes_0.1.0~alpha.X-1_amd64.deb
 ```
+
+The resulting `.deb` carries the full source tree to `/opt/hermes/`
+and runs `install.sh` automatically in `postinst`. End users do:
+
+```bash
+sudo dpkg -i hermes_0.1.0~alpha.X-1_amd64.deb
+sudo apt install -f   # resolves any deps dpkg pulled
+```
+
+## Building the Docker image
+
+```bash
+docker build -t hermes:local -f packaging/Dockerfile .
+```
+
+Multi-arch:
+
+```bash
+docker buildx create --use
+docker buildx build \
+    --platform linux/amd64,linux/arm64 \
+    -t ghcr.io/<org>/hermes:0.1.0-alpha.X \
+    -f packaging/Dockerfile \
+    --push .
+```
+
+## Building an offline bundle
+
+```bash
+./packaging/build-offline-bundle.sh \
+    --arch amd64 \
+    --out hermes-0.1.0-alpha.X-amd64-offline.tar.gz
+```
+
+Output: ~150 MB compressed. Includes:
+- Full source tree
+- `.deb`s for every system package (~80 MB)
+- Python wheels for every dep (~50 MB)
+- Pre-built SvelteKit bundle
+
+## Why .deb (and Docker) and not Snap / Flatpak / AppImage
+
+- **.deb** is the native package format on the Pi 4 production target
+  (Raspberry Pi OS = Debian). Lower memory overhead than Snap/Flatpak
+  runtimes.
+- **AppImage** is a single-file desktop format; HERMES is a
+  multi-process service stack, not a desktop app. AppImage doesn't
+  handle systemd unit installation cleanly.
+- **Docker** covers the "any-Linux" use case for everyone who's
+  running anything other than Pi.
+
+## Why ".deb" deps go through apt and not bundled
+
+The realistic minimum on a fresh Debian/Ubuntu is:
+
+```
+postgresql-16             ~30 MB installed
+timescaledb               ~5 MB
+mosquitto                 ~2 MB
+nginx                     ~6 MB
+python3.11                ~50 MB (interpreter + stdlib)
++ HERMES wheels           ~50 MB
++ HERMES SvelteKit build  ~5 MB
+─────────────────────────
+Total                     ~150 MB
+```
+
+Bundling all that as a single AppImage or static binary would also be
+~150 MB — not smaller. And the security model is worse (you'd ship
+your own copies of OpenSSL / glibc and never patch them). Going
+through apt means the host's package manager handles security
+updates for everything-except-HERMES on its normal cadence.
+
+The offline bundle (Path C) does ship all those .debs — but it's only
+~150 MB compressed because dpkg has done the dedup against the host's
+existing libs.

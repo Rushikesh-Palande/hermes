@@ -1,0 +1,52 @@
+#!/bin/sh
+# postinst — Debian post-install hook for the `hermes` package.
+#
+# debhelper invocation contract: this runs after dpkg has unpacked
+# the package onto disk. We use it to:
+#
+#   1. Create the `hermes` system user + group.
+#   2. Run the standard install.sh (idempotent) to set up the DB,
+#      generate secrets, install systemd units, and start services.
+#
+# We deliberately delegate to install.sh rather than re-implementing
+# its logic here — keeping a single source of truth for "how do you
+# bring HERMES up on a fresh box".
+
+set -e
+
+case "$1" in
+    configure)
+        # Create the system user/group if they don't exist.
+        if ! getent group hermes >/dev/null; then
+            addgroup --system hermes
+        fi
+        if ! getent passwd hermes >/dev/null; then
+            adduser --system --ingroup hermes --no-create-home \
+                --home /opt/hermes --shell /usr/sbin/nologin \
+                --gecos "HERMES sensor dashboard" \
+                hermes
+        fi
+
+        # Run the full installer. install.sh is idempotent — on a
+        # package upgrade it just refreshes the venv + UI build and
+        # restarts the services.
+        if [ -x /opt/hermes/packaging/install.sh ]; then
+            # Run with deps already satisfied by Depends: above
+            HERMES_SKIP_DEPS=1 /opt/hermes/packaging/install.sh \
+                --skip-nginx 2>&1 \
+                | logger -t hermes-postinst || true
+        fi
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0
