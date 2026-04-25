@@ -130,6 +130,10 @@ async def test_event_round_trip_writes_event_and_window() -> None:
         decoded = decode_window(window.data, window.encoding)
         assert len(decoded) == window.sample_count
         # All decoded sample timestamps fall inside the declared range.
-        assert all(
-            window.start_ts.timestamp() <= ts <= window.end_ts.timestamp() for ts, _ in decoded
-        )
+        # Allow 1 µs slop on either side: ``datetime.fromtimestamp(x).timestamp()``
+        # is not always bit-identical to ``x`` for boundary samples
+        # (off-by-one-ULP at the seconds → sub-second conversion).
+        slop = 1e-6
+        start = window.start_ts.timestamp() - slop
+        end = window.end_ts.timestamp() + slop
+        assert all(start <= ts <= end for ts, _ in decoded)

@@ -62,8 +62,9 @@ from hermes.detection.config import (
 )
 from hermes.detection.db_sink import DbEventSink
 from hermes.detection.engine import DetectionEngine
+from hermes.detection.mqtt_sink import MqttEventSink
 from hermes.detection.session import ensure_default_session
-from hermes.detection.sink import LoggingEventSink
+from hermes.detection.sink import LoggingEventSink, MultiplexEventSink
 from hermes.detection.types import EventSink
 from hermes.detection.window_buffer import EventWindowBuffer
 from hermes.ingest.clock import ClockRegistry
@@ -183,7 +184,11 @@ class IngestPipeline:
         self.offset_cache = OffsetCache()
         self._clocks = ClockRegistry(drift_threshold_s=settings.mqtt_drift_threshold_s)
 
-        sink: EventSink
+        # Sinks: events fan out to (a) DB persistence and (b) outbound
+        # MQTT topic, in that order. Use MultiplexEventSink so an outage
+        # on one branch (e.g. broker down) doesn't silence the other.
+        # In tests / no-session mode we drop DB and just log + publish.
+        sinks: list[EventSink] = []
         if session_id is not None:
             import uuid as _uuid
 
@@ -192,10 +197,18 @@ class IngestPipeline:
                 session_id=session_id,
                 window_buffer=self.window_buffer,
             )
-            sink = self._db_sink
+            sinks.append(self._db_sink)
         else:
             self._db_sink = None
-            sink = LoggingEventSink()
+            sinks.append(LoggingEventSink())
+
+        # Outbound MQTT publish to stm32/events/<dev>/<sid>/<TYPE>. The
+        # paho client doesn't exist yet (we connect in start()); we
+        # attach it later. Pre-start fires log + drop, no crash.
+        self.mqtt_event_sink = MqttEventSink(
+            base_topic=settings.mqtt_topic_events_prefix,
+        )
+        sinks.append(self.mqtt_event_sink)
 
         # Default to a static all-disabled provider so a fresh deployment
         # is silent until thresholds are written via /api/config. The API
@@ -204,7 +217,7 @@ class IngestPipeline:
             config_provider = StaticConfigProvider(TypeAConfig(enabled=False))
         self.detection_engine = DetectionEngine(
             config_provider=config_provider,
-            sink=sink,
+            sink=MultiplexEventSink(sinks),
         )
         self._stop_event = asyncio.Event()
         self._queue: asyncio.Queue[tuple[bytes, float]] = asyncio.Queue()
@@ -271,6 +284,9 @@ class IngestPipeline:
         client.connect_async(settings.mqtt_host, settings.mqtt_port, keepalive=60)
         client.loop_start()
         self._client = client
+        # Wire the same paho client into the outbound event sink so
+        # detected events can publish back over MQTT.
+        self.mqtt_event_sink.attach_client(client)
 
         self._consumer_task = asyncio.create_task(
             _consume(
@@ -293,6 +309,10 @@ class IngestPipeline:
         self._stop_event.set()
         if self._consumer_task is not None:
             await self._consumer_task
+        # Drop the client reference on the outbound sink BEFORE
+        # disconnecting paho — any event still in flight will skip the
+        # publish (logged warn) instead of racing a torn-down client.
+        self.mqtt_event_sink.detach_client()
         if self._client is not None:
             self._client.loop_stop()
             self._client.disconnect()
