@@ -248,10 +248,38 @@ async def _commit_and_reload(request: Request, session: AsyncSession) -> DbConfi
     await provider.reload()
     pipeline = getattr(request.app.state, "ingest_pipeline", None)
     if pipeline is not None:
+        # Detection engine is None in multi-shard live_only mode (the
+        # API process subscribes to MQTT only for SSE; detection runs in
+        # separate hermes-ingest@N processes and reloads via Postgres
+        # NOTIFY — see DbConfigProvider.start_listener).
         engine = pipeline.detection_engine
-        for device_id in list(engine.device_ids()):
-            engine.reset_device(device_id)
+        if engine is not None:
+            for device_id in list(engine.device_ids()):
+                engine.reset_device(device_id)
+    # Tell the detection shards (if any) to reload + reset. Single-
+    # process deployments have no listeners; emitting NOTIFY there is a
+    # no-op, so we always emit unconditionally.
+    await _notify_config_changed(provider)
     return provider
+
+
+async def _notify_config_changed(provider: DbConfigProvider) -> None:
+    """
+    Emit ``NOTIFY hermes_config_changed`` so multi-shard detection
+    processes reload their config provider + reset cached detectors.
+    """
+    from sqlalchemy import text
+
+    from hermes.db.engine import async_session
+
+    async with async_session() as session:
+        # Postgres NOTIFY runs as part of the current transaction; we
+        # commit explicitly to publish the message immediately.
+        await session.execute(
+            text("SELECT pg_notify('hermes_config_changed', :payload)"),
+            {"payload": str(provider.package_id)},
+        )
+        await session.commit()
 
 
 def _cache_to_dict(cache: object, type_name: TypeName) -> dict[str, Any]:

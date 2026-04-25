@@ -1,0 +1,61 @@
+# systemd template unit for HERMES detection shards (Layer 3).
+#
+# Used for multi-process deployments where a single ``hermes-ingest``
+# instance can't keep up with the production load (20 devices x 12
+# sensors x 100 Hz = 2 000 msg/s = 24 000 samples/s). The bench shows
+# alpha.14 sustains ~5 500 msg/s on a Pi 4 single-process, so this is
+# only needed for safety / future device-count growth — not required
+# for the current production target.
+#
+# Each instance gets a shard index via the systemd specifier %i:
+#
+#     systemctl enable --now hermes-ingest@0.service
+#     systemctl enable --now hermes-ingest@1.service
+#     systemctl enable --now hermes-ingest@2.service
+#     systemctl enable --now hermes-ingest@3.service
+#
+# In multi-shard mode the API process must run as ``live_only`` so SSE
+# keeps working (one of the detection shards owns the live ring buffer
+# for its slice; the API needs its own subscription for all devices).
+# Set HERMES_INGEST_MODE=live_only in /etc/hermes/api.env.
+#
+# Config sync across shards: the API emits ``NOTIFY hermes_config_changed``
+# after committing a parameter update; every shard's DbConfigProvider
+# LISTENs on that channel and reloads its provider + resets cached
+# detectors.
+
+[Unit]
+Description=HERMES detection shard %i
+Documentation=file:///opt/hermes/docs/contracts/INGESTION_PIPELINE.md
+After=network-online.target postgresql.service mosquitto.service
+Wants=network-online.target
+PartOf=hermes.target
+
+[Service]
+Type=simple
+User=hermes
+Group=hermes
+WorkingDirectory=/opt/hermes
+EnvironmentFile=/etc/hermes/secrets.env
+EnvironmentFile=/etc/hermes/ingest.env
+# Per-instance shard config. HERMES_SHARD_COUNT is set in ingest.env to
+# match the number of enabled instances; HERMES_SHARD_INDEX comes from
+# the systemd specifier (%i) and is unique per instance.
+Environment=HERMES_INGEST_MODE=shard
+Environment=HERMES_SHARD_INDEX=%i
+ExecStart=/opt/hermes/.venv/bin/hermes-ingest
+Restart=on-failure
+RestartSec=5s
+# Drop kernel capabilities we don't need.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/log/hermes /var/lib/hermes
+# Memory budget per shard. A Pi 4 with 4 shards uses ~600 MB total of
+# Python heap; this cap is 80 % of that to leave OOM headroom.
+MemoryHigh=200M
+MemoryMax=300M
+
+[Install]
+WantedBy=hermes.target

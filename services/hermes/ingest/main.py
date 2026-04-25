@@ -1,5 +1,5 @@
 """
-MQTT consumer — Phase 2 + 3 (parser, clock, offsets, detection, persistence).
+MQTT consumer — parser, clock, offsets, detection, persistence.
 
 Pipeline (all on the asyncio event loop after the callback hand-off):
 
@@ -8,18 +8,40 @@ Pipeline (all on the asyncio event loop after the callback hand-off):
               via loop.call_soon_threadsafe
 
     _consume() coroutine (event loop)
-        → json.loads
+        → orjson.loads                  (Layer 1: orjson, not stdlib json)
+        → optional shard filter         (Layer 3: drop non-owned devices)
         → parse_stm32_adc_payload   → {sensor_id: raw_float}
         → ClockRegistry.anchor      → wall_ts
         → OffsetCache.apply         → {sensor_id: corrected_float}
         → LiveDataHub.push          → live ring buffer (SSE reads from here)
         → EventWindowBuffer.push    → 30 s ring buffer (DB sink reads from here)
-        → DetectionEngine.feed_snapshot
-            → for each detected event: DbEventSink.publish (queues for write)
+        → DetectionEngine.feed_snapshot   (skipped in live_only mode)
+            → for each detected event:
+                TtlGateSink → MultiplexEventSink → [DbEventSink, MqttEventSink]
 
     DbEventSink._writer_loop (event loop, background task)
         → for each event: wait until triggered_at + 9 s, slice the
           window buffer, write events + event_windows in one tx.
+
+Operating modes (selected via ``Settings.hermes_ingest_mode``):
+    * "all"        — single process subscribes to everything, runs
+                     detection on all devices, fills live ring buffer.
+                     Default. Bench: ~16 700 msg/s laptop / ~5 500 msg/s Pi 4.
+    * "shard"      — one of N detection processes (Layer 3). Subscribes
+                     to ``stm32/adc`` and discards messages where
+                     ``device_id % shard_count != shard_index``.
+                     Owns detection + DB sink + outbound MQTT for its
+                     slice. Does NOT fill the live ring buffer.
+    * "live_only"  — runs no detection; just keeps the live ring buffer
+                     warm for SSE. Used by the API process when shards
+                     are running.
+
+Cross-shard config sync (Layer 3):
+    The API process emits ``NOTIFY hermes_config_changed`` after committing
+    a parameter update. Each detection shard's DbConfigProvider runs a
+    LISTEN coroutine on that channel and reloads its provider + resets
+    cached detectors when notified. Single-process deployments use the
+    same code path; the API just reloads in-process.
 
 Embedding in the API process:
     The API lifespan creates an IngestPipeline and stores its
@@ -101,13 +123,25 @@ async def _consume(
     offsets: OffsetCache,
     live: LiveDataHub,
     window_buffer: EventWindowBuffer,
-    detection: DetectionEngine,
+    detection: DetectionEngine | None,
     stop_event: asyncio.Event,
+    shard_count: int = 1,
+    shard_index: int = 0,
 ) -> None:
     """
     Drain the handoff queue and run the full ingestion pipeline.
 
     Runs until ``stop_event`` is set and the queue is empty.
+
+    Layer 3 multi-process shard support (zero-cost when ``shard_count==1``):
+      * If ``shard_count > 1``, messages where
+        ``device_id % shard_count != shard_index`` are dropped after
+        parse but before any work happens. The hash is intentionally
+        the same on every shard (modulo of a stable integer key) so
+        each device deterministically lands on exactly one shard.
+      * If ``detection`` is None (e.g. API process running in
+        ``live_only`` mode for SSE only), the detect step is skipped
+        but live + window buffers still fill normally.
 
     Hot-path discipline (Layer 1 micro-opts):
       * ``orjson.loads`` instead of stdlib ``json`` — 3-5x faster on
@@ -139,7 +173,10 @@ async def _consume(
     offsets_apply = offsets.apply
     live_push = live.push
     window_push = window_buffer.push_snapshot
-    detect_feed = detection.feed_snapshot
+    # Detection feed is None in live_only mode (API process for SSE).
+    detect_feed = detection.feed_snapshot if detection is not None else None
+    # Shard predicate: pre-built once. When count == 1 we never check it.
+    sharded = shard_count > 1
 
     while not stop_event.is_set() or not queue.empty():
         try:
@@ -159,6 +196,12 @@ async def _consume(
             continue
 
         device_id: int = int(payload.get("device_id", 1))
+        # Shard filter: drop messages whose device isn't ours. Cheap
+        # int modulo. Done before MSGS_RECEIVED_TOTAL so the counter
+        # only ticks for messages this process actually processes —
+        # summing the counter across all shards gives the true total.
+        if sharded and device_id % shard_count != shard_index:
+            continue
         device_label = str(device_id)
         metrics_msgs_received.labels(device_id=device_label).inc()
 
@@ -190,9 +233,10 @@ async def _consume(
         # join is straightforward.
         metrics_samples_processed.labels(device_id=device_label).inc(len(sensor_values))
 
-        # --- Feed detection engine ---
-        with metrics_time_stage("detect"):
-            detect_feed(device_id, ts, sensor_values)
+        # --- Feed detection engine (skipped in live_only mode) ---
+        if detect_feed is not None:
+            with metrics_time_stage("detect"):
+                detect_feed(device_id, ts, sensor_values)
 
 
 class IngestPipeline:
@@ -223,57 +267,72 @@ class IngestPipeline:
         config_provider: DetectorConfigProvider | None = None,
     ) -> None:
         self._settings = settings
+        self._mode = settings.hermes_ingest_mode
+        self._shard_count = settings.hermes_shard_count
+        self._shard_index = settings.hermes_shard_index
         self.live_data = LiveDataHub(maxlen=settings.live_buffer_max_samples)
         self.window_buffer = EventWindowBuffer()
         self.offset_cache = OffsetCache()
         self._clocks = ClockRegistry(drift_threshold_s=settings.mqtt_drift_threshold_s)
+
+        # In live_only mode (multi-shard API process), we run no detection
+        # and own no sinks — purpose is purely to keep the live ring
+        # buffer warm for SSE. Detection shards do that work.
+        run_detection = self._mode != "live_only"
 
         # Sinks: events fan out to (a) DB persistence and (b) outbound
         # MQTT topic, in that order. Use MultiplexEventSink so an outage
         # on one branch (e.g. broker down) doesn't silence the other.
         # In tests / no-session mode we drop DB and just log + publish.
         sinks: list[EventSink] = []
-        if session_id is not None:
-            import uuid as _uuid
+        self._db_sink: DbEventSink | None = None
+        self.mqtt_event_sink: MqttEventSink | None = None
+        self.ttl_gate: TtlGateSink | None = None
+        self.detection_engine: DetectionEngine | None = None
 
-            assert isinstance(session_id, _uuid.UUID), "session_id must be a UUID when provided"
-            self._db_sink: DbEventSink | None = DbEventSink(
-                session_id=session_id,
-                window_buffer=self.window_buffer,
+        if run_detection:
+            if session_id is not None:
+                import uuid as _uuid
+
+                assert isinstance(session_id, _uuid.UUID), "session_id must be a UUID when provided"
+                self._db_sink = DbEventSink(
+                    session_id=session_id,
+                    window_buffer=self.window_buffer,
+                )
+                sinks.append(self._db_sink)
+            else:
+                sinks.append(LoggingEventSink())
+
+            # Outbound MQTT publish to stm32/events/<dev>/<sid>/<TYPE>. The
+            # paho client doesn't exist yet (we connect in start()); we
+            # attach it later. Pre-start fires log + drop, no crash.
+            self.mqtt_event_sink = MqttEventSink(
+                base_topic=settings.mqtt_topic_events_prefix,
             )
-            sinks.append(self._db_sink)
-        else:
-            self._db_sink = None
-            sinks.append(LoggingEventSink())
+            sinks.append(self.mqtt_event_sink)
 
-        # Outbound MQTT publish to stm32/events/<dev>/<sid>/<TYPE>. The
-        # paho client doesn't exist yet (we connect in start()); we
-        # attach it later. Pre-start fires log + drop, no crash.
-        self.mqtt_event_sink = MqttEventSink(
-            base_topic=settings.mqtt_topic_events_prefix,
-        )
-        sinks.append(self.mqtt_event_sink)
+            # Default to a static all-disabled provider so a fresh
+            # deployment is silent until thresholds are written via
+            # /api/config. The API lifespan swaps in a DbConfigProvider
+            # once a session exists.
+            if config_provider is None:
+                config_provider = StaticConfigProvider(TypeAConfig(enabled=False))
 
-        # Default to a static all-disabled provider so a fresh deployment
-        # is silent until thresholds are written via /api/config. The API
-        # lifespan swaps in a DbConfigProvider once a session exists.
-        if config_provider is None:
-            config_provider = StaticConfigProvider(TypeAConfig(enabled=False))
+            # TTL gate sits between the detector and the durable sinks.
+            # Bursts of same-type events on the same sensor collapse to
+            # one forwarded event; lower-priority types are blocked
+            # while a higher-priority is armed; BREAK bypasses entirely.
+            # The gate also exposes a flush() called on shutdown so we
+            # don't lose held events.
+            self.ttl_gate = TtlGateSink(
+                child=MultiplexEventSink(sinks),
+                ttl_seconds=settings.event_ttl_seconds,
+            )
+            self.detection_engine = DetectionEngine(
+                config_provider=config_provider,
+                sink=self.ttl_gate,
+            )
 
-        # TTL gate sits between the detector and the durable sinks.
-        # Bursts of same-type events on the same sensor collapse to one
-        # forwarded event; lower-priority types are blocked while a
-        # higher-priority is armed; BREAK bypasses entirely. The gate
-        # also exposes a flush() called on shutdown so we don't lose
-        # held events.
-        self.ttl_gate = TtlGateSink(
-            child=MultiplexEventSink(sinks),
-            ttl_seconds=settings.event_ttl_seconds,
-        )
-        self.detection_engine = DetectionEngine(
-            config_provider=config_provider,
-            sink=self.ttl_gate,
-        )
         self._stop_event = asyncio.Event()
         self._queue: asyncio.Queue[tuple[bytes, float]] = asyncio.Queue()
         self._consumer_task: asyncio.Task[None] | None = None
@@ -288,6 +347,13 @@ class IngestPipeline:
 
         if self._db_sink is not None:
             await self._db_sink.start()
+
+        log.info(
+            "ingest_starting",
+            mode=self._mode,
+            shard_index=self._shard_index,
+            shard_count=self._shard_count,
+        )
 
         loop = asyncio.get_running_loop()
         settings = self._settings
@@ -343,8 +409,10 @@ class IngestPipeline:
         client.loop_start()
         self._client = client
         # Wire the same paho client into the outbound event sink so
-        # detected events can publish back over MQTT.
-        self.mqtt_event_sink.attach_client(client)
+        # detected events can publish back over MQTT. live_only has no
+        # sink because it runs no detection.
+        if self.mqtt_event_sink is not None:
+            self.mqtt_event_sink.attach_client(client)
 
         self._consumer_task = asyncio.create_task(
             _consume(
@@ -355,6 +423,8 @@ class IngestPipeline:
                 self.window_buffer,
                 self.detection_engine,
                 self._stop_event,
+                shard_count=self._shard_count,
+                shard_index=self._shard_index,
             ),
             name="mqtt-consumer",
         )
@@ -369,12 +439,14 @@ class IngestPipeline:
             await self._consumer_task
         # Force-forward any TTL-held events so a graceful shutdown
         # doesn't silently drop a burst that was still inside the
-        # 5 s dedup window.
-        self.ttl_gate.flush()
+        # 5 s dedup window. Skipped in live_only mode (no detection).
+        if self.ttl_gate is not None:
+            self.ttl_gate.flush()
         # Drop the client reference on the outbound sink BEFORE
         # disconnecting paho — any event still in flight will skip the
         # publish (logged warn) instead of racing a torn-down client.
-        self.mqtt_event_sink.detach_client()
+        if self.mqtt_event_sink is not None:
+            self.mqtt_event_sink.detach_client()
         if self._client is not None:
             self._client.loop_stop()
             self._client.disconnect()
@@ -414,8 +486,27 @@ async def run() -> None:
     pipeline = IngestPipeline(settings, session_id=session_id, config_provider=config_provider)
     await pipeline.start()
 
+    # Layer 3: subscribe to config-changed notifications. Single-process
+    # deployments use the same code path; the API still emits NOTIFY but
+    # has nothing to do because it reloaded its own provider in-process.
+    # Multi-shard deployments rely on this LISTEN to invalidate caches
+    # in detection shards when the operator updates thresholds via UI.
+    if config_provider is not None:
+        try:
+            await config_provider.start_listener(
+                dsn=settings.migrate_database_url,
+                engine=pipeline.detection_engine,
+            )
+        except Exception:
+            log.exception("config_listener_start_failed_continuing")
+
     try:
         await stop_event.wait()
     finally:
+        if config_provider is not None:
+            try:
+                await config_provider.stop_listener()
+            except Exception:
+                log.exception("config_listener_stop_failed")
         await pipeline.stop()
         await dispose_engine()

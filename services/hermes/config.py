@@ -26,7 +26,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -105,8 +105,59 @@ class Settings(BaseSettings):
     # are blocked. Legacy default is 5 s. BREAK events bypass.
     event_ttl_seconds: float = 5.0
 
+    # ─── Multi-process shard (Layer 3) ─────────────────────────────
+    # The single-process default is fine for the 2 000 msg/s production
+    # target on a Pi 4 (bench shows ~5 500 msg/s sustained on Pi 4 with
+    # alpha.14 micro-opts, ~2.7x headroom). Multi-shard mode exists for
+    # safety: bursty workloads, future device-count growth, or when
+    # other services on the same Pi steal CPU.
+    #
+    # Operating modes (set via ``hermes_ingest_mode``):
+    #   * "all"       — single process subscribes to everything, runs
+    #                   detection on all devices, fills live ring buffer.
+    #                   Default. ``shard_count`` is ignored.
+    #   * "shard"     — one of N detection processes. Subscribes to all
+    #                   stm32/adc messages but discards anything where
+    #                   ``device_id % shard_count != shard_index``.
+    #                   Runs detection + DB sink + outbound MQTT for its
+    #                   slice of devices. Does NOT fill the live ring
+    #                   buffer (the API does that in "live_only" mode).
+    #   * "live_only" — subscribes to all stm32/adc messages, fills the
+    #                   live ring buffer for SSE, runs NO detection.
+    #                   Used by the API process when shard_count > 1.
+    #
+    # In multi-shard deployments the API runs as ``live_only`` and N
+    # ``hermes-ingest@.service`` instances run as ``shard``. Each shard
+    # owns ``device_id % shard_count == shard_index`` for hash-stable
+    # routing; detection state and the TTL gate stay isolated per
+    # (device, sensor), so sharding by device preserves all rules.
+    hermes_ingest_mode: Literal["all", "shard", "live_only"] = "all"
+    hermes_shard_count: int = 1
+    hermes_shard_index: int = 0
+
     # ─── Development ───────────────────────────────────────────────
     hermes_dev_mode: bool = False
+
+    @model_validator(mode="after")
+    def _validate_shard_config(self) -> Settings:
+        """Cross-field check: shard math must be consistent."""
+        if self.hermes_shard_count < 1:
+            raise ValueError("hermes_shard_count must be >= 1")
+        if not (0 <= self.hermes_shard_index < self.hermes_shard_count):
+            raise ValueError(
+                f"hermes_shard_index ({self.hermes_shard_index}) must satisfy "
+                f"0 <= index < shard_count ({self.hermes_shard_count})"
+            )
+        if self.hermes_ingest_mode == "shard" and self.hermes_shard_count == 1:
+            # Allowed but probably a misconfig; warn-shaped via ValueError so
+            # the deployment fails fast rather than silently running a single
+            # "shard" that owns every device (functionally equivalent to
+            # "all", but the operator probably meant to set shard_count > 1).
+            raise ValueError(
+                "hermes_ingest_mode='shard' requires hermes_shard_count > 1; "
+                "use mode='all' for single-process deployments"
+            )
+        return self
 
 
 @lru_cache(maxsize=1)
