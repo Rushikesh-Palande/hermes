@@ -327,6 +327,7 @@ Route modules live under `services/hermes/api/routes/`:
 | `events.py`        | `/api/events/*` — list, detail, window, CSV/NDJSON export              |
 | `offsets.py`       | `/api/devices/<id>/offsets` — calibration CRUD                         |
 | `config.py`        | `/api/config/*` — parameter CRUD with `_commit_and_reload` + `NOTIFY`  |
+| `mqtt_brokers.py`  | `/api/mqtt-brokers/*` — broker registry; one row active at a time      |
 | `live.py`          | `/api/live/sse` — Server-Sent Events from `LiveDataHub`                |
 | `metrics.py`       | `/api/metrics` — Prometheus text-format exposition                     |
 | `health.py`        | `/api/health` — basic liveness + DB ping                               |
@@ -337,6 +338,14 @@ Route modules live under `services/hermes/api/routes/`:
 hashes the 6-digit code with argon2-cffi before storing. While
 `HERMES_DEV_MODE=1`, every protected route accepts a stub user — that's
 the dev shim, not production behaviour.
+
+`secret_box.py` (alpha.18) provides at-rest symmetric encryption for
+operator-typed secrets — currently the MQTT broker password. Fernet
+key is derived from `HERMES_JWT_SECRET` via HKDF-SHA256 with a domain
+separator, so a leaked Fernet key cannot forge JWTs and vice versa.
+Rotating the JWT secret invalidates every active session AND
+necessitates re-entry of stored broker passwords — same "reset
+everything" mental model.
 
 ### 5.4 SSE
 

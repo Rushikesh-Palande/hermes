@@ -123,3 +123,38 @@ export interface DeviceOffsetsOut {
 	device_id: number;
 	offsets: SensorOffsetOut[];
 }
+
+export interface MqttBrokerOut {
+	broker_id: number;
+	host: string;
+	port: number;
+	username: string | null;
+	has_password: boolean;
+	use_tls: boolean;
+	is_active: boolean;
+	created_at: string;
+}
+
+export interface MqttBrokerIn {
+	host: string;
+	port?: number;
+	username?: string | null;
+	password?: string | null;
+	use_tls?: boolean;
+	is_active?: boolean;
+}
+
+export interface MqttBrokerPatch {
+	host?: string;
+	port?: number;
+	username?: string | null;
+	/**
+	 * Password write semantics:
+	 *   - omitted (undefined) → unchanged
+	 *   - "" empty string    → cleared
+	 *   - non-empty           → re-encrypted and stored
+	 */
+	password?: string;
+	use_tls?: boolean;
+	is_active?: boolean;
+}
