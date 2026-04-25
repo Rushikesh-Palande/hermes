@@ -8,6 +8,41 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.11] — 2026-04-25
+
+### Added
+
+- **Outbound MQTT event publish** (gap 1, `HARDWARE_INTERFACE.md` §6).
+  Every detected event now also lands on
+  `stm32/events/<device_id>/<sensor_id>/<EVENT_TYPE>` with a
+  `{"timestamp": "YYYY-MM-DD HH:MM:SS.mmm", "sensor_value": float|null}`
+  body, matching the legacy topic shape so existing PLC / SCADA
+  subscribers keep working. New `services/hermes/detection/mqtt_sink.py`.
+- **`MultiplexEventSink`** (`services/hermes/detection/sink.py`) fans
+  events out to N children and isolates per-child failures, so a broker
+  outage can't disable DB persistence (or vice versa).
+
+### Changed
+
+- `IngestPipeline` now constructs both sinks (DB + MQTT) and feeds the
+  detection engine through a `MultiplexEventSink`. The paho client is
+  attached to the outbound sink after connection and detached before
+  shutdown, so late events skip the publish instead of racing a torn-
+  down client.
+
+### Fixed
+
+- `test_jwt_tampered_signature_rejected` — flip a byte in the JWT
+  payload segment instead of the signature segment. Last-char flips
+  could occasionally round-trip through base64url and the test would
+  flake.
+- `test_event_round_trip_writes_event_and_window` — the
+  `window.start_ts.timestamp() <= ts <= window.end_ts.timestamp()`
+  assertion now allows 1 µs slop. `datetime.fromtimestamp(x).timestamp()`
+  is not bit-identical to `x` at sub-second boundaries (off-by-1-ULP);
+  the test was probing a precision invariant that doesn't matter
+  semantically.
+
 ## [0.1.0-alpha.10] — 2026-04-25
 
 ### Added
@@ -311,7 +346,8 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
   CODE_OF_CONDUCT, CODEOWNERS, issue and PR templates, Dependabot config,
   `.gitignore`, `.gitattributes`, `.editorconfig`.
 
-[Unreleased]:      https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.10...HEAD
+[Unreleased]:      https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.11...HEAD
+[0.1.0-alpha.11]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.10...v0.1.0-alpha.11
 [0.1.0-alpha.10]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.9...v0.1.0-alpha.10
 [0.1.0-alpha.9]:   https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.8...v0.1.0-alpha.9
 [0.1.0-alpha.8]:  https://github.com/Rushikesh-Palande/hermes/compare/v0.1.0-alpha.7...v0.1.0-alpha.8
