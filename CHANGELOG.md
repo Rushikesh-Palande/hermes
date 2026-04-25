@@ -8,6 +8,104 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.25] — 2026-04-26
+
+### Documentation sprint — 10 new in-depth guides + reference catalogs
+
+User asked for "each and every document" with extreme detail and
+diagrams. This release lands the full set. README's "Key documents"
+section is restructured into three groups (rewrite guides, design +
+reference, frozen legacy contracts) so finding the right doc is a
+single scan.
+
+### Added
+
+#### Under `docs/guides/` (operator + developer prose, with diagrams)
+
+- **`WORKFLOW.md`** — end-to-end data flow walkthrough. Big-picture
+  diagram, then Stage 0–7 each with its own zoomed diagram. Covers
+  STM32 firmware shape, paho callback, `_consume`, buffers,
+  detection + mode gating, TTL gate, durable sinks, operator
+  surfaces, the Modbus inlet variant, what each load level looks
+  like, and a failure-mode lookup table.
+- **`BACKEND.md`** — every Python module under `services/hermes/`.
+  Top-level files, `api/` + `auth/` + `db/` + `detection/` +
+  `ingest/` subtrees, route catalog, concurrency rules, cross-
+  reference of which gap landed in which file, and a "places where
+  the code is non-obvious" lookup.
+- **`UI.md`** — every SvelteKit page. Stack + conventions, `$lib/api`
+  / `types.ts` / `LiveChart.svelte` deep dives, page-by-page
+  composition with ASCII mock-ups, live-chart internals, auth flow
+  + token lifecycle, build/deploy.
+- **`EVENTS.md`** — detector mechanics in detail. Five event types
+  table, common machinery (sliding window, debounce, init-fill ratio,
+  data-gap reset), each Type A/B/C/D detector with formula + state
+  diagram, BREAK + mode-switching state machine with asymmetric
+  grace windows, priority + TTL gate's four rules, storage shape
+  (events.metadata + event_windows), tuning recipes, and a 12-row
+  "why didn't it fire?" debug matrix.
+- **`CONFIGURATION.md`** — every env var + every DB-backed setting
+  in one place. Two-layer model diagram, env vars by group, DB-
+  backed settings by table, scope resolution diagram for parameter
+  rows, where-to-set-what lookup table, .env file template (dev +
+  prod /etc/hermes split), how-to-add a new env var, how-to-add a
+  new parameter key.
+- **`METRICS.md`** — every Prometheus metric. Organized by category
+  (inbound throughput, detection output, pipeline state, hot-path
+  latency, session_samples writer, Modbus poller). Reading-the-labels
+  guidance, helper APIs for tests, multi-shard scraping
+  considerations, suggested Grafana dashboard panels with thresholds.
+- **`DEVELOPMENT.md`** — local dev environment setup. Prereqs,
+  one-time setup, daily run loop (4-terminal pattern), project
+  layout cheat sheet, useful commands (Python + UI + DB + MQTT +
+  Git), debugging common pitfalls (port 5432, psql missing, WSL env
+  vars, TS server staleness, golden LFS, no live data, no fires),
+  IDE setup notes for VSCode + PyCharm.
+- **`TESTING.md`** — test tier strategy. Four tiers in one table
+  (unit / integration / bench / golden), per-tier rules + what
+  lives where + how to run, test-writing conventions, mocking
+  philosophy ("don't"), CI matrix, coverage expectations, single-
+  test invocation patterns.
+
+#### Under `docs/design/` (catalog reference for the rewrite)
+
+- **`DATABASE_SCHEMA.md`** — every table, column, default,
+  constraint, index, hypertable setting. Schema overview diagram,
+  migrations layout, per-enum + per-table reference (devices,
+  packages, parameters, sessions, session_logs, events,
+  event_windows, session_samples, sensor_offsets, users, user_otps,
+  mqtt_brokers), triggers, hypertable compression policies, LISTEN/
+  NOTIFY channels, common queries.
+- **`REST_API.md`** — every endpoint with request/response shapes.
+  Conventions, a single endpoint-index table at top, then per-
+  resource sections with shapes + status codes + side effects.
+  Covers: health, auth, devices, offsets, events, config, sessions,
+  packages, mqtt-brokers, system-tunables, live_stream, metrics.
+  Plus a how-to checklist for adding a new endpoint.
+
+### Changed
+
+- **`README.md`** — "Key documents" restructured into three groups
+  so a new contributor sees the rewrite-guides set before the
+  legacy contracts.
+- **CONTRIBUTING.md** — left as-is (still accurate).
+
+### Removed (cleanup)
+
+- 18 empty folders that were leftover layout placeholders nothing
+  used: `tests/contracts/`, `tests/e2e/`, `tests/fixtures/`,
+  `tests/performance/`, `tests/unit/{api,detection,storage}/`,
+  `services/api/{routes,schemas}/`, `services/api/`,
+  `services/shared/{detection,models,storage,telemetry}/`,
+  `services/shared/`, `services/ingest/`, `docs/events/`,
+  `migrations/versions/`. The current code lives at
+  `services/hermes/...` and the test tiers are flat under
+  `tests/{unit,integration,bench,golden}/`.
+
+No code changes. All four test tiers still green.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
 ## [0.1.0-alpha.24] — 2026-04-26
 
 ### Fixed
