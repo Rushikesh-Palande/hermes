@@ -263,19 +263,48 @@ uv run mypy services
 When in doubt, follow the cross-links — most files have rationale near
 the top.
 
+### Rewrite guides (`docs/guides/`) — extreme detail with diagrams
+
+| If you want to ...                                       | Read                                                                              |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Walk a sensor reading from STM32 to UI to event row      | [`docs/guides/WORKFLOW.md`](./docs/guides/WORKFLOW.md)                            |
+| Map every Python module + responsibility                 | [`docs/guides/BACKEND.md`](./docs/guides/BACKEND.md)                              |
+| Map every SvelteKit page + behaviour                     | [`docs/guides/UI.md`](./docs/guides/UI.md)                                        |
+| Understand Type A/B/C/D + BREAK + mode switching         | [`docs/guides/EVENTS.md`](./docs/guides/EVENTS.md)                                |
+| Reference every env var + DB-backed setting              | [`docs/guides/CONFIGURATION.md`](./docs/guides/CONFIGURATION.md)                  |
+| Reference every Prometheus metric                        | [`docs/guides/METRICS.md`](./docs/guides/METRICS.md)                              |
+| Set up a local dev environment                           | [`docs/guides/DEVELOPMENT.md`](./docs/guides/DEVELOPMENT.md)                      |
+| Run / write tests across all four tiers                  | [`docs/guides/TESTING.md`](./docs/guides/TESTING.md)                              |
+
+### Rewrite design + reference (`docs/design/`)
+
 | If you want to ...                                       | Read                                                                              |
 | -------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | Get productive on the rewrite in 30 minutes              | [`docs/design/ARCHITECTURE.md`](./docs/design/ARCHITECTURE.md)                    |
+| See every table, column, index, constraint               | [`docs/design/DATABASE_SCHEMA.md`](./docs/design/DATABASE_SCHEMA.md)              |
+| See every REST endpoint with request/response shapes     | [`docs/design/REST_API.md`](./docs/design/REST_API.md)                            |
+| See the rewrite's data model rationale                   | [`docs/design/DATABASE_REDESIGN.md`](./docs/design/DATABASE_REDESIGN.md)          |
+| Deploy multi-process for scaling/safety                  | [`docs/design/MULTI_SHARD.md`](./docs/design/MULTI_SHARD.md)                      |
+
+### Frozen legacy contracts (`docs/contracts/`) — what the OLD system did
+
+| If you want to ...                                       | Read                                                                              |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | Understand the legacy system before changing it          | [`docs/contracts/`](./docs/contracts/) (whole directory)                          |
 | Know whether a divergence from legacy is allowed         | [`docs/contracts/BUG_DECISION_LOG.md`](./docs/contracts/BUG_DECISION_LOG.md)      |
-| See the rewrite's data model decisions                   | [`docs/design/DATABASE_REDESIGN.md`](./docs/design/DATABASE_REDESIGN.md)          |
-| Deploy multi-process for scaling/safety                  | [`docs/design/MULTI_SHARD.md`](./docs/design/MULTI_SHARD.md)                      |
-| Find the HTTP API spec                                   | [`docs/contracts/API_CONTRACT.md`](./docs/contracts/API_CONTRACT.md)              |
-| Understand how detector A/B/C/D fire                     | [`docs/contracts/EVENT_DETECTION_CONTRACT.md`](./docs/contracts/EVENT_DETECTION_CONTRACT.md) |
-| Wire format for STM32 telemetry                          | [`docs/contracts/HARDWARE_INTERFACE.md`](./docs/contracts/HARDWARE_INTERFACE.md)  |
+| See the legacy HTTP API spec                             | [`docs/contracts/API_CONTRACT.md`](./docs/contracts/API_CONTRACT.md)              |
+| See the legacy detector spec                             | [`docs/contracts/EVENT_DETECTION_CONTRACT.md`](./docs/contracts/EVENT_DETECTION_CONTRACT.md) |
+| See the wire format for STM32 telemetry                  | [`docs/contracts/HARDWARE_INTERFACE.md`](./docs/contracts/HARDWARE_INTERFACE.md)  |
+| See the legacy DB invariants                             | [`docs/contracts/DATABASE_CONTRACT.md`](./docs/contracts/DATABASE_CONTRACT.md)    |
+| Know how parity vs legacy will be validated              | [`docs/contracts/GOLDEN_TRAFFIC_PLAN.md`](./docs/contracts/GOLDEN_TRAFFIC_PLAN.md) |
+
+### Other
+
+| If you want to ...                                       | Read                                                                              |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | Branch / commit / release conventions                    | [`CONTRIBUTING.md`](./CONTRIBUTING.md)                                            |
-| Known divergences and their reasons                      | [`docs/contracts/BUG_DECISION_LOG.md`](./docs/contracts/BUG_DECISION_LOG.md)      |
-| All deployment configuration knobs                       | [Configuration reference](#configuration-reference) (below)                       |
+| Inspect the per-release changelog                        | [`CHANGELOG.md`](./CHANGELOG.md)                                                  |
+| All deployment configuration knobs (one-screen summary)  | [Configuration reference](#configuration-reference) (below)                       |
 
 ---
 
