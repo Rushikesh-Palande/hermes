@@ -51,6 +51,7 @@ detection engine is enforced by golden-traffic regression tests.
 
 | Version              | Headline                                                              |
 | -------------------- | --------------------------------------------------------------------- |
+| `v0.1.0-alpha.23`    | Golden-traffic harness — deterministic replay + synthetic corpora     |
 | `v0.1.0-alpha.22`    | System-tunables read-only dashboard at `/settings`                    |
 | `v0.1.0-alpha.21`    | Modbus TCP support — async poller + DB-backed device discovery        |
 | `v0.1.0-alpha.20`    | `session_samples` continuous writer (asyncpg COPY, opt-in per session) |
@@ -82,7 +83,7 @@ nine areas where the rewrite must reach parity. Status:
 | 6   | Continuous-sample writer (`session_samples`)   | ✅ Shipped (alpha.20)                    |
 | 7   | Modbus TCP support                             | ✅ Shipped (alpha.21)                    |
 | 8   | System-tunables UI                             | ✅ Shipped (alpha.22, read-only)         |
-| 9   | Golden-traffic harness                         | 🟡 Partial — full corpus pending         |
+| 9   | Golden-traffic harness                         | ✅ Shipped (alpha.23, synthetic corpora) |
 
 Layers 1–3 of the perf plan are complete:
 
@@ -308,7 +309,7 @@ the top.
 | Unit         | `tests/unit/`         | (default)  | Fast (< 1 s), deterministic, no I/O. ~146 tests.                     |
 | Integration  | `tests/integration/`  | `db`       | Real Postgres via docker-compose. Schema, API endpoints, persistence. |
 | Bench        | `tests/bench/`        | `bench`    | Throughput. Drains 2 000 synthetic MQTT msgs and asserts a budget.   |
-| Golden       | `tests/golden/`       | `golden`   | Replay recorded MQTT captures, diff detector output vs legacy. Pending. |
+| Golden       | `tests/golden/`       | `golden`   | Deterministic corpus replay through the detection engine; baselines pinned per scenario. Re-bless via `HERMES_GOLDEN_UPDATE=1`. |
 | E2E          | `tests/e2e/`          | (planned)  | Playwright on the built UI. Phase 5+.                                |
 
 ```bash

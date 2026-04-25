@@ -83,6 +83,7 @@ markers = [
   "db: integration tests that hit a real Postgres",
   "mqtt: tests that require a Mosquitto broker",
   "bench: synthetic-load throughput benchmark (deselected by default)",
+  "golden: legacy-parity replay tests (gap 9, see tests/golden/README.md)",
 ]
 
 [tool.ruff]
