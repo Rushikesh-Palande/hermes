@@ -83,7 +83,7 @@ async def test_empty_list_returns_empty_array(api_client: AsyncClient) -> None:
 @pytest.mark.db
 @pytest.mark.asyncio
 async def test_list_orders_newest_first(api_client: AsyncClient) -> None:
-    session_id = await ensure_default_session()
+    session_id, _ = await ensure_default_session()
     await _seed_device()
     base = datetime.now(tz=UTC)
     older = await _seed_event(session_id=session_id, triggered_at=base - timedelta(minutes=10))
@@ -98,7 +98,7 @@ async def test_list_orders_newest_first(api_client: AsyncClient) -> None:
 @pytest.mark.db
 @pytest.mark.asyncio
 async def test_filter_by_device_and_sensor(api_client: AsyncClient) -> None:
-    session_id = await ensure_default_session()
+    session_id, _ = await ensure_default_session()
     await _seed_device(1)
     await _seed_device(2)
     base = datetime.now(tz=UTC)
@@ -117,7 +117,7 @@ async def test_filter_by_device_and_sensor(api_client: AsyncClient) -> None:
 @pytest.mark.db
 @pytest.mark.asyncio
 async def test_filter_by_event_type(api_client: AsyncClient) -> None:
-    session_id = await ensure_default_session()
+    session_id, _ = await ensure_default_session()
     await _seed_device()
     base = datetime.now(tz=UTC)
     for et in (EventType.A, EventType.B, EventType.C, EventType.D):
@@ -133,7 +133,7 @@ async def test_filter_by_event_type(api_client: AsyncClient) -> None:
 @pytest.mark.db
 @pytest.mark.asyncio
 async def test_filter_by_time_range(api_client: AsyncClient) -> None:
-    session_id = await ensure_default_session()
+    session_id, _ = await ensure_default_session()
     await _seed_device()
     base = datetime.now(tz=UTC)
     await _seed_event(session_id=session_id, triggered_at=base - timedelta(hours=2))
@@ -151,7 +151,7 @@ async def test_filter_by_time_range(api_client: AsyncClient) -> None:
 @pytest.mark.db
 @pytest.mark.asyncio
 async def test_pagination(api_client: AsyncClient) -> None:
-    session_id = await ensure_default_session()
+    session_id, _ = await ensure_default_session()
     await _seed_device()
     base = datetime.now(tz=UTC)
     for i in range(5):
@@ -174,7 +174,7 @@ async def test_pagination(api_client: AsyncClient) -> None:
 @pytest.mark.db
 @pytest.mark.asyncio
 async def test_get_single_event(api_client: AsyncClient) -> None:
-    session_id = await ensure_default_session()
+    session_id, _ = await ensure_default_session()
     await _seed_device()
     eid = await _seed_event(
         session_id=session_id,
@@ -200,7 +200,7 @@ async def test_get_missing_event_returns_404(api_client: AsyncClient) -> None:
 @pytest.mark.db
 @pytest.mark.asyncio
 async def test_get_event_window_decodes_samples(api_client: AsyncClient) -> None:
-    session_id = await ensure_default_session()
+    session_id, _ = await ensure_default_session()
     await _seed_device()
     samples = [(1.0, 10.0), (1.01, 10.5), (1.02, 9.8)]
     eid = await _seed_event(
@@ -221,7 +221,7 @@ async def test_get_event_window_decodes_samples(api_client: AsyncClient) -> None
 async def test_get_window_for_event_without_window_returns_404(
     api_client: AsyncClient,
 ) -> None:
-    session_id = await ensure_default_session()
+    session_id, _ = await ensure_default_session()
     await _seed_device()
     eid = await _seed_event(
         session_id=session_id,

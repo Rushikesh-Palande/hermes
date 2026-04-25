@@ -54,12 +54,49 @@ async def api_client() -> AsyncIterator[AsyncClient]:
     HTTPX client wired directly into the FastAPI app via ASGI transport.
 
     No real socket is opened — requests dispatch straight to route
-    handlers. Integration tests that need a real socket should use
-    the `live_server` fixture (lands in a later PR).
+    handlers. ASGITransport does NOT trigger lifespan events, so this
+    fixture mounts ``app.state`` manually for the routes that need it
+    (config endpoints rely on a live ``config_provider``).
+
+    The MQTT pipeline is NOT started here — tests don't talk to a broker.
+    The detection engine on the stub pipeline is real, so reset_device()
+    calls from the config routes work as in production.
     """
-    from hermes.api.main import create_app  # local import: avoids cost when tests skip
+    from hermes.api.main import create_app
+    from hermes.config import get_settings
 
     app = create_app()
     transport = ASGITransport(app=app)
+
+    # Best-effort state setup. If the DB isn't reachable (e.g. unit-only
+    # test runs that pull this fixture indirectly), leave state empty so
+    # routes that don't need it still work; routes that do need it 503.
+    try:
+        from hermes.detection.db_config import DbConfigProvider
+        from hermes.detection.engine import DetectionEngine
+        from hermes.detection.session import ensure_default_session
+        from hermes.detection.sink import LoggingEventSink
+
+        _, package_id = await ensure_default_session()
+        provider = DbConfigProvider(package_id)
+        await provider.reload()
+        engine = DetectionEngine(provider, LoggingEventSink())
+
+        class _StubPipeline:
+            """Just enough surface for config routes to call reset_device."""
+
+            def __init__(self) -> None:
+                self.detection_engine = engine
+
+        app.state.config_provider = provider
+        app.state.ingest_pipeline = _StubPipeline()
+    except Exception:
+        # Tests that don't need the DB-backed state work without it.
+        pass
+
+    # Settings is imported solely to ensure the env defaults applied
+    # above produced a valid Settings — fail fast if not.
+    get_settings()
+
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
         yield client
