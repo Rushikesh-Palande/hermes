@@ -15,6 +15,9 @@
 @tailwind components;
 @tailwind utilities;
 
+/* uPlot's own stylesheet — axes, legend, grid. Shipped with the package. */
+@import 'uplot/dist/uPlot.min.css';
+
 @layer base {
     :root {
         --hermes-focus-ring: 0 0 0 2px rgb(59 130 246 / 0.6);

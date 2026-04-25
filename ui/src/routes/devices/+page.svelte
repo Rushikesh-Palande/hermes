@@ -161,7 +161,14 @@
 				{#each devices as d (d.device_id)}
 					<tr class="border-t border-neutral-100 dark:border-neutral-800/50">
 						<td class="px-4 py-2 font-mono">{d.device_id}</td>
-						<td class="px-4 py-2">{d.name}</td>
+						<td class="px-4 py-2">
+							<a
+								href={`/devices/${d.device_id}`}
+								class="text-neutral-900 hover:underline dark:text-neutral-100"
+							>
+								{d.name}
+							</a>
+						</td>
 						<td class="px-4 py-2 font-mono text-xs text-neutral-500">
 							{d.topic ?? '(default)'}
 						</td>
@@ -173,6 +180,12 @@
 							{/if}
 						</td>
 						<td class="px-4 py-2 text-right">
+							<a
+								href={`/devices/${d.device_id}`}
+								class="mr-3 text-xs text-neutral-600 underline hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+							>
+								Live
+							</a>
 							<button
 								type="button"
 								onclick={() => toggleActive(d)}
