@@ -8,6 +8,72 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.22] — 2026-04-26
+
+### System-tunables UI — gap 8 (read-only)
+
+A unified Settings landing page so operators don't have to ssh into
+the host to inspect the live configuration. Read-only by design;
+detection thresholds and per-device knobs are already editable on
+the existing `/config`, `/mqtt-brokers`, `/sessions`, and `/devices`
+pages, which the new page links to.
+
+### Added
+
+- **`GET /api/system-tunables`** in
+  `services/hermes/api/routes/system_tunables.py`. Returns:
+  - **Live state** — version, ingest_mode, shard topology
+    (count + index), dev_mode flag, log_format, active GLOBAL
+    session id, count of active LOCAL sessions, count of sessions
+    where `record_raw_samples=true`, count of active MQTT and
+    Modbus devices.
+  - **Tunables list** — boot-time settings (`event_ttl_seconds`,
+    `live_buffer_max_samples`, `mqtt_drift_threshold_s`,
+    `hermes_jwt_expiry_seconds`, `otp_expiry_seconds`,
+    `otp_max_per_hour`) with an `editable` field per row:
+    `live` / `via_other_route` / `restart`. The `restart` rows
+    carry an `edit_hint` with the exact env-var name + systemd
+    command so operators can copy-paste.
+  - Sensitive fields (JWT secret, DB URL, SMTP password) are
+    explicitly NEVER included; an integration test fails if they
+    leak.
+- **`/settings` SvelteKit page** in
+  `ui/src/routes/settings/+page.svelte`. Renders the live state
+  grid, links to the four editable surfaces (`/config`,
+  `/mqtt-brokers`, `/sessions`, `/devices`), and a tunables table
+  with colour-coded badges per row.
+- **Top-nav** `Settings` item.
+- **`SystemTunablesOut`, `SystemStateOut`, `TunableField`,
+  `IngestMode`, `TunableEditable`** TypeScript shapes in
+  `ui/src/lib/types.ts`.
+- **8 new integration tests**
+  (`tests/integration/test_system_tunables_api.py`) — bootstrap
+  state visible, recording-count reflects `record_raw_samples`,
+  device counts split by protocol, inactive devices excluded,
+  tunables list contains the documented set, no secret fields
+  leak in the response, `editable` distinguishes routes,
+  version is reported (not the unknown fallback).
+
+### Changed
+
+- **`services/hermes/__init__.py`** now reads `__version__` from
+  `importlib.metadata` so it doesn't drift from `pyproject.toml`.
+  Falls back to `"0.0.0+unknown"` only when the package isn't
+  installed (e.g. PYTHONPATH-only checkouts).
+
+### Out of scope (deliberate)
+
+- Writability for the boot-time tunables. Making them runtime-
+  editable means adding a re-read mechanism in every consumer
+  (`TtlGateSink`, `ClockRegistry`, `LiveDataHub`) — a dedicated
+  follow-up. Until then the response is honest about what
+  requires a restart.
+
+Total tests now: 197 unit + 133 integration = 330 passing. Bench
+unchanged.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
 ## [0.1.0-alpha.21] — 2026-04-26
 
 ### Modbus TCP support — gap 7

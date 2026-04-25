@@ -52,6 +52,7 @@ from hermes.api.routes import (
     offsets,
     packages,
     sessions,
+    system_tunables,
 )
 from hermes.api.routes import (
     metrics as metrics_route,
@@ -144,6 +145,9 @@ def create_app() -> FastAPI:
     app.include_router(mqtt_brokers.router, prefix="/api/mqtt-brokers", tags=["mqtt-brokers"])
     app.include_router(packages.router, prefix="/api/packages", tags=["packages"])
     app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
+    app.include_router(
+        system_tunables.router, prefix="/api/system-tunables", tags=["system-tunables"]
+    )
     app.include_router(
         offsets.router,
         prefix="/api/devices/{device_id}/offsets",

@@ -18,4 +18,17 @@ dependency gymnastics. Deployment-wise they remain fully independent —
 see `packaging/` for the systemd units.
 """
 
-__version__ = "0.1.0a1"
+try:
+    # Read at import time from the installed package metadata so this
+    # never drifts from ``pyproject.toml``. Falls back to the literal
+    # only when running from a non-installed checkout (e.g. PYTHONPATH
+    # tricks during local dev).
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _pkg_version
+
+    try:
+        __version__ = _pkg_version("hermes")
+    except PackageNotFoundError:
+        __version__ = "0.0.0+unknown"
+except ImportError:  # pragma: no cover - python < 3.8 unreachable
+    __version__ = "0.0.0+unknown"

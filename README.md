@@ -51,6 +51,7 @@ detection engine is enforced by golden-traffic regression tests.
 
 | Version              | Headline                                                              |
 | -------------------- | --------------------------------------------------------------------- |
+| `v0.1.0-alpha.22`    | System-tunables read-only dashboard at `/settings`                    |
 | `v0.1.0-alpha.21`    | Modbus TCP support — async poller + DB-backed device discovery        |
 | `v0.1.0-alpha.20`    | `session_samples` continuous writer (asyncpg COPY, opt-in per session) |
 | `v0.1.0-alpha.19`    | Sessions + Packages API + UI (lifecycle, audit log, package cloning)  |
@@ -80,7 +81,7 @@ nine areas where the rewrite must reach parity. Status:
 | 5   | Sessions UI (start/stop/attach package)        | ✅ Shipped (alpha.19)                    |
 | 6   | Continuous-sample writer (`session_samples`)   | ✅ Shipped (alpha.20)                    |
 | 7   | Modbus TCP support                             | ✅ Shipped (alpha.21)                    |
-| 8   | System-tunables UI                             | ⏳ Pending                               |
+| 8   | System-tunables UI                             | ✅ Shipped (alpha.22, read-only)         |
 | 9   | Golden-traffic harness                         | 🟡 Partial — full corpus pending         |
 
 Layers 1–3 of the perf plan are complete:

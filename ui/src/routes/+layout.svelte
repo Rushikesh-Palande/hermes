@@ -30,7 +30,8 @@
 		{ href: '/events', label: 'Events' },
 		{ href: '/sessions', label: 'Sessions' },
 		{ href: '/config', label: 'Config' },
-		{ href: '/mqtt-brokers', label: 'MQTT' }
+		{ href: '/mqtt-brokers', label: 'MQTT' },
+		{ href: '/settings', label: 'Settings' }
 	];
 
 	function isActive(href: string): boolean {
