@@ -41,7 +41,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from hermes import __version__
-from hermes.api.routes import auth, devices, health, live_stream
+from hermes.api.routes import auth, devices, events, health, live_stream
 from hermes.config import get_settings
 from hermes.db.engine import dispose_engine
 from hermes.detection.session import ensure_default_session
@@ -121,6 +121,7 @@ def create_app() -> FastAPI:
 
     # Authenticated resources.
     app.include_router(devices.router, prefix="/api/devices", tags=["devices"])
+    app.include_router(events.router, prefix="/api/events", tags=["events"])
 
     # Live SSE telemetry feed. Public for now; will move behind auth in
     # Phase 4 (auth polish) once the JWT flow is wired through the UI.
