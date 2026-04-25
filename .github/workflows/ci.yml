@@ -56,6 +56,9 @@ jobs:
       MIGRATE_DATABASE_URL: postgresql://hermes_migrate:test@localhost:5432/hermes_test
       HERMES_JWT_SECRET: test-secret-test-secret-test-secret-test-secret
       HERMES_LOG_FORMAT: console
+      # Enable the auth bypass until the OTP + JWT flow lands (Phase 3.5);
+      # integration tests rely on it for CurrentUser-protected routes.
+      HERMES_DEV_MODE: "1"
 
     steps:
       - uses: actions/checkout@v4
