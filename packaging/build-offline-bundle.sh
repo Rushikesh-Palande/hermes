@@ -111,22 +111,19 @@ echo "[3/5] Building Python wheelhouse..."
 install -d "${BUNDLE}/packaging/wheelhouse"
 (
     cd "${REPO_ROOT}"
-    # Use uv to resolve and download all wheels for the target arch.
-    # `uv pip wheel` builds source distros where wheels aren't on PyPI.
-    # Resolve runtime deps from the lockfile and build wheels for them.
-    # `uv export` honours --no-dev so we skip ruff/mypy/pytest etc.
+    # Export pinned deps from uv.lock (no dev extras) as a requirements
+    # file, then download pre-built binary wheels for all of them.
+    # `uv pip download` prefers binary wheels; falls back to sdist only
+    # when no wheel exists on PyPI (unlikely for our deps).
     uv export --no-dev --format requirements-txt > "${STAGE}/requirements.txt"
-    uv pip wheel \
-        --wheel-dir "${BUNDLE}/packaging/wheelhouse" \
-        --python-version 3.11 \
+    uv pip download \
+        --dest "${BUNDLE}/packaging/wheelhouse" \
         -r "${STAGE}/requirements.txt"
-    # Build the project itself as a wheel so install.sh can `pip install
-    # hermes-*.whl` from the wheelhouse without needing the source tree.
-    uv pip wheel \
-        --wheel-dir "${BUNDLE}/packaging/wheelhouse" \
-        --no-deps \
-        --python-version 3.11 \
-        "${REPO_ROOT}"
+    # Build the project itself as a wheel so install.sh can
+    # `pip install hermes-*.whl` offline without the full source tree.
+    uv build \
+        --wheel \
+        --out-dir "${BUNDLE}/packaging/wheelhouse"
 )
 
 # ─── Pre-build the UI ─────────────────────────────────────────────

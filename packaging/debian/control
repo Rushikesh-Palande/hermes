@@ -7,7 +7,7 @@ Maintainer: EmbedSquare <ops@embedsquare.com>
 # build a wheel at .deb build time — we skip that with --without python3
 # in debian/rules. nodejs/npm/pnpm are handled in the workflow's "Install
 # build deps" step (system apt's nodejs is too old for SvelteKit).
-Build-Depends: debhelper-compat (= 13)
+Build-Depends: debhelper-compat (= 13), build-essential
 Standards-Version: 4.6.2
 Homepage: https://github.com/Rushikesh-Palande/hermes
 

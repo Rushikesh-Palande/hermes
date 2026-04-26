@@ -104,41 +104,44 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "deb_version=$DEB_VERSION" >> "$GITHUB_OUTPUT"
 
+      # pnpm + node are needed by debian/rules override_dh_auto_build
+      # (cd ui && pnpm install --frozen-lockfile && pnpm build). Setting
+      # them up via actions guarantees pnpm is on PATH when
+      # dpkg-buildpackage invokes make, which the manual npm-global
+      # approach did not reliably achieve.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
       - name: Sync debian/changelog with the tag
         run: |
-          # Emit a top-line entry matching this tag so dpkg-buildpackage
-          # uses the right version. The committed changelog stays as a
-          # template; this is regenerated per build.
-          cat > debian-changelog-tmp <<EOF
-          hermes (${{ steps.version.outputs.deb_version }}) unstable; urgency=medium
-
-            * Release ${{ steps.version.outputs.tag }}. See CHANGELOG.md.
-
-           -- HERMES Release Bot <ops@embedsquare.com>  $(date -R)
-          EOF
+          # printf avoids any YAML-indentation contamination that a
+          # heredoc inside `run: |` could introduce. Debian changelog
+          # requires column-0 for the header and footer lines.
+          printf 'hermes (%s) unstable; urgency=medium\n\n  * Release %s. See CHANGELOG.md.\n\n -- HERMES Release Bot <ops@embedsquare.com>  %s\n' \
+            '${{ steps.version.outputs.deb_version }}' \
+            '${{ steps.version.outputs.tag }}' \
+            "$(date -R)" > debian-changelog-tmp
           cat debian-changelog-tmp packaging/debian/changelog > /tmp/cl
           mv /tmp/cl packaging/debian/changelog
-          # The debhelper convention is debian/changelog at the repo root
-          # so it can find pyproject.toml etc. We symlink instead of
-          # moving so paths in install.sh / postinst still resolve.
-          rm -rf debian
-          ln -s packaging/debian debian
+          # debhelper expects debian/ at the repo root. cp -r avoids any
+          # symlink-resolution edge cases in debhelper tools.
+          cp -r packaging/debian debian
 
       - name: Install build deps
         run: |
-          # debhelper-only build deps; we don't pull dh-python because
-          # debian/rules opts out of Python detection with --without
-          # python3 (the venv is built at install time on the host).
-          sudo apt-get update
+          # build-essential is listed in debian/control Build-Depends and
+          # is checked by dpkg-checkbuilddeps; install it explicitly so
+          # the check passes (ubuntu-24.04 runners may not pre-install it).
+          sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            debhelper devscripts \
-            ca-certificates curl gnupg
-          # Node + pnpm for the UI build that debian/rules invokes.
-          curl -fsSL https://nodejs.org/dist/v20.18.0/node-v20.18.0-linux-x64.tar.xz \
-            | sudo tar -xJ -C /opt
-          sudo ln -sf /opt/node-v20.18.0-linux-x64/bin/node /usr/local/bin/node
-          sudo ln -sf /opt/node-v20.18.0-linux-x64/bin/npm /usr/local/bin/npm
-          sudo npm install -g pnpm@9
+            build-essential \
+            debhelper devscripts
 
       - name: Build the .deb
         run: |

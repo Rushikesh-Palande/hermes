@@ -8,6 +8,40 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.28] — 2026-04-26
+
+### Release-workflow hotfix (round 2)
+
+Two bugs remained after alpha.27 that kept CI red:
+
+- **`uv pip wheel` is not a valid uv subcommand.** `build-offline-bundle.sh`
+  called `uv pip wheel --wheel-dir ...` which does not exist in uv 0.5+.
+  The valid commands are `uv pip download` (fetch pre-built wheels from
+  PyPI) and `uv build --wheel` (build the project's own wheel). Replaced
+  both calls accordingly.
+
+- **`build-essential:native` missing in build-deb.** `dpkg-checkbuilddeps`
+  checks for `build-essential:native` implicitly even when it is not in
+  `debian/control` Build-Depends; ubuntu-24.04 runners do not pre-install
+  it. Added `build-essential` to Build-Depends and to the `apt-get install`
+  step so the check passes.
+
+- **pnpm not on PATH during `dpkg-buildpackage`.** The `debian/rules`
+  `override_dh_auto_build` target runs `pnpm install && pnpm build`. The
+  previous manual `npm install -g pnpm@9` approach installed pnpm under
+  the node tarball's own prefix (not `/usr/local/bin`), so pnpm was
+  unreachable when `make` ran the rule. Replaced the manual node setup with
+  `pnpm/action-setup@v4` + `actions/setup-node@v4`, which correctly add
+  pnpm and node to PATH for all subsequent steps including the
+  `dpkg-buildpackage` subprocess.
+
+- **Switched from `ln -s` to `cp -r` for `debian/` directory.** The
+  symlink `debian → packaging/debian` works for most debhelper tools but
+  can confuse a few that read relative paths from inside the symlink target.
+  Copying avoids the edge case entirely.
+
+No app code changes.
+
 ## [0.1.0-alpha.27] — 2026-04-25
 
 ### Release-workflow hotfix
