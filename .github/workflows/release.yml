@@ -173,6 +173,70 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # ─── 1b. Backend-only .deb (no UI, no pnpm/node) ───────────────
+
+  build-deb-backend:
+    name: Build backend-only .deb
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          DEB_VERSION="$(echo "$VERSION" \
+              | sed -e 's/-alpha\./~alpha./' \
+                    -e 's/-beta\./~beta./' \
+                    -e 's/-rc\./~rc./')-1"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "deb_version=$DEB_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sync debian/changelog with the tag
+        run: |
+          printf 'hermes-backend (%s) unstable; urgency=medium\n\n  * Release %s. See CHANGELOG.md.\n\n -- HERMES Release Bot <ops@embedsquare.com>  %s\n' \
+            '${{ steps.version.outputs.deb_version }}' \
+            '${{ steps.version.outputs.tag }}' \
+            "$(date -R)" > debian-changelog-tmp
+          cat debian-changelog-tmp packaging/debian-backend/changelog > /tmp/cl
+          mv /tmp/cl packaging/debian-backend/changelog
+          cp -r packaging/debian-backend debian
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            debhelper devscripts
+
+      - name: Build the backend .deb
+        run: |
+          dpkg-buildpackage -us -uc -b
+          ls -la ../*.deb
+          mkdir -p dist
+          cp ../*.deb dist/
+
+      - name: Inspect the .deb
+        run: |
+          for deb in dist/*.deb; do
+            echo "─── $deb ───"
+            dpkg-deb -I "$deb" | head -20
+            echo "Files (first 20):"
+            dpkg-deb -c "$deb" | head -20
+          done
+
+      - name: Upload backend .deb artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-backend
+          path: dist/*.deb
+          if-no-files-found: error
+          retention-days: 7
+
   # ─── 2. Offline bundles ─────────────────────────────────────────
 
   build-offline:
@@ -272,7 +336,7 @@ jobs:
   release:
     name: Create GitHub Release
     runs-on: ubuntu-24.04
-    needs: [build-deb, build-offline, build-docker]
+    needs: [build-deb, build-deb-backend, build-offline, build-docker]
     permissions:
       contents: write
     steps:
@@ -290,7 +354,7 @@ jobs:
           mkdir -p release-assets
           # Move everything out of per-job subdirs into release-assets/
           find dist -mindepth 2 -type f -exec mv {} release-assets/ \;
-          (cd release-assets && sha256sum *.deb *.tar.gz > SHA256SUMS)
+          (cd release-assets && sha256sum *.deb *.tar.gz 2>/dev/null > SHA256SUMS)
           ls -la release-assets/
 
       - name: Generate professional release body

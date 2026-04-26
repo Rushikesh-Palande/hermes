@@ -1,0 +1,45 @@
+Source: hermes-backend
+Section: misc
+Priority: optional
+Maintainer: EmbedSquare <ops@embedsquare.com>
+# Backend-only package: no UI, no Node/pnpm build at .deb build time.
+Build-Depends: debhelper-compat (= 13), build-essential
+Standards-Version: 4.6.2
+Homepage: https://github.com/Rushikesh-Palande/hermes
+
+Package: hermes-backend
+# Pure Python source — Architecture: all works on amd64 and arm64.
+# The platform-specific venv is built at install time by
+# packaging/install.sh (postinst → install.sh --skip-ui).
+Architecture: all
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         python3.11,
+         python3-venv,
+         postgresql-16,
+         timescaledb-2-postgresql-16,
+         mosquitto,
+         adduser
+# nginx is Recommends here: the API listens on :8080 directly, so nginx
+# is not required. Operators running a custom frontend or reverse proxy
+# can omit it.
+Recommends: nginx, certbot, python3-certbot-nginx
+Description: HERMES backend — industrial sensor ingest + REST API (no UI)
+ HERMES ingests 12-channel ADC telemetry from STM32 hardware over MQTT
+ at ~100 Hz per sensor, runs four parallel event-detection algorithms
+ (A/B/C/D + BREAK mode transition), persists events with +-9 s context
+ windows to TimescaleDB, and exposes the full dataset via a REST API.
+ .
+ This is the API-only package without the SvelteKit operator dashboard.
+ Use it when integrating HERMES with a custom frontend, a third-party
+ visualisation tool, or a SCADA / PLC system consuming events over MQTT.
+ The full stack (API + dashboard) is in the hermes package.
+ .
+ After install:
+ .
+   * API:   http://<host>:8080/api/health
+   * Docs:  http://<host>:8080/docs  (Swagger UI)
+   * Logs:  journalctl -u hermes-api -u hermes-ingest -f
+ .
+ See /opt/hermes/docs/customer/INTEGRATION_GUIDE.md for the complete
+ API reference, authentication guide, and integration examples.

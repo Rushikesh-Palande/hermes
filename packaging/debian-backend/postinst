@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# debian/postinst — hermes-backend post-install hook.
+#
+# Delegates to packaging/install.sh with:
+#   --skip-ui     : no pnpm build, no static-file nginx block
+#   --skip-nginx  : nginx is Recommends, not Depends; skip if absent
+# HERMES_SKIP_DEPS=1 tells install.sh to skip apt/dnf package installs
+# because dpkg has already satisfied the Depends field.
+
+set -euo pipefail
+
+case "$1" in
+    configure)
+        HERMES_SKIP_DEPS=1 \
+            /opt/hermes/packaging/install.sh \
+            --skip-ui \
+            --skip-nginx
+        ;;
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+    *)
+        echo "postinst called with unknown argument: $1" >&2
+        exit 1
+        ;;
+esac

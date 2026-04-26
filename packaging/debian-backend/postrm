@@ -1,0 +1,45 @@
+#!/bin/sh
+# postrm — Debian post-remove hook for the `hermes-backend` package.
+#
+# Two forms:
+#   - `remove`: package removed but config kept (apt remove)
+#   - `purge`:  config + DB also removed (apt purge)
+
+set -e
+
+case "$1" in
+    remove)
+        if [ -d /run/systemd/system ]; then
+            systemctl stop hermes-api.service hermes-ingest.service \
+                'hermes-ingest@*.service' 2>/dev/null || true
+            systemctl disable hermes-api.service hermes-ingest.service 2>/dev/null || true
+            systemctl daemon-reload || true
+        fi
+        ;;
+
+    purge)
+        if [ -x /opt/hermes/packaging/uninstall.sh ]; then
+            /opt/hermes/packaging/uninstall.sh --drop-database \
+                2>&1 | logger -t hermes-backend-postrm || true
+        fi
+        rm -rf /opt/hermes /etc/hermes /var/log/hermes /var/lib/hermes
+        if getent passwd hermes >/dev/null; then
+            deluser --system hermes 2>/dev/null || true
+        fi
+        if getent group hermes >/dev/null; then
+            delgroup --system hermes 2>/dev/null || true
+        fi
+        ;;
+
+    upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        ;;
+
+    *)
+        echo "postrm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

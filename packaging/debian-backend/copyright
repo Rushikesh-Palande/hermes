@@ -1,0 +1,24 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: hermes-backend
+Upstream-Contact: ops@embedsquare.com
+Source: https://github.com/Rushikesh-Palande/hermes
+
+Files: *
+Copyright: 2026 EmbedSquare
+License: Proprietary
+ Proprietary software. Distribution and use are restricted; see the
+ LICENSE file at the top of the repository for terms.
+ .
+ No license is granted to redistribute, modify, or sublicense this
+ work without prior written permission from EmbedSquare.
+
+Files: services/hermes/detection/sliding.py
+       services/hermes/detection/type_a.py
+       services/hermes/detection/type_b.py
+       services/hermes/detection/type_c.py
+       services/hermes/detection/type_d.py
+Copyright: 2026 EmbedSquare
+License: Proprietary
+Comment: Detector algorithms ported from the legacy HERMES dashboard
+ (also EmbedSquare). See docs/contracts/EVENT_DETECTION_CONTRACT.md
+ for the behaviour spec.

@@ -1,0 +1,7 @@
+hermes-backend (0.1.0~alpha.30-1) unstable; urgency=medium
+
+  * Backend-only .deb package (hermes-backend). Ships the Python API +
+    ingest services without the SvelteKit UI. For custom-frontend and
+    API-integration deployments.
+
+ -- EmbedSquare <ops@embedsquare.com>  Sun, 26 Apr 2026 12:00:00 +0000

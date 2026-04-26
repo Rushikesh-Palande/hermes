@@ -1,0 +1,13 @@
+# What goes where during dpkg-deb assembly — backend-only variant.
+# The ui/ directory is intentionally omitted; install.sh --skip-ui
+# detects its absence and skips pnpm build and the nginx static files.
+services/         opt/hermes/services
+migrations/       opt/hermes/migrations
+scripts/          opt/hermes/scripts
+packaging/        opt/hermes/packaging
+docs/             opt/hermes/docs
+pyproject.toml    opt/hermes
+uv.lock           opt/hermes
+README.md         opt/hermes
+LICENSE           opt/hermes
+CHANGELOG.md      opt/hermes

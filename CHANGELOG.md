@@ -8,6 +8,29 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.30] — 2026-04-26
+
+### Backend-only .deb + customer integration guide
+
+- **`hermes-backend` Debian package.** New `packaging/debian-backend/`
+  packaging for customers who bring their own frontend and want only the
+  Python API + ingest services. Excludes the SvelteKit UI; nginx is
+  `Recommends` (not `Depends`) so it can be omitted. Postinst calls
+  `install.sh --skip-ui --skip-nginx`. The `.deb` is built by a new
+  `build-deb-backend` job in the release workflow and uploaded as the
+  `deb-backend` artifact.
+
+- **`docs/customer/INTEGRATION_GUIDE.md`.** Comprehensive API reference
+  for external integrators: system overview and architecture diagram,
+  authentication flow (email OTP → JWT), full REST API reference for all
+  40+ endpoints with request/response examples, database schema with
+  entity diagram, event detection algorithm descriptions, MQTT payload
+  format (inbound and outbound), configuration reference (all env vars),
+  Prometheus metrics catalogue, error reference, and quick-start code
+  examples in Python, JavaScript/Node, and curl.
+
+No app code changes.
+
 ## [0.1.0-alpha.29] — 2026-04-26
 
 ### Release-workflow hotfix (round 3)

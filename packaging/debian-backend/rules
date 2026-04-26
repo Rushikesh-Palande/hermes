@@ -1,0 +1,21 @@
+#!/usr/bin/make -f
+# debian/rules — backend-only .deb build orchestration.
+#
+# No UI build: this package ships the Python API + ingest services only.
+# pnpm / Node.js are not needed. The SvelteKit dashboard is in the
+# full `hermes` package.
+
+%:
+	dh $@ --without python3
+
+override_dh_auto_build:
+	# No UI build for the backend-only package.
+
+override_dh_auto_install:
+	# No-op. debian/install handles placement.
+
+override_dh_auto_test:
+	# Skip — pytest runs in CI, not at .deb build time.
+
+override_dh_strip:
+	# Nothing to strip; pure Python.
