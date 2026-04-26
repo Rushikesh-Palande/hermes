@@ -156,7 +156,7 @@ async def _ensure_package_exists(session: AsyncSession, package_id: uuid.UUID) -
     pkg = await session.get(Package, package_id)
     if pkg is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"package {package_id} not found",
         )
     return pkg
@@ -286,7 +286,7 @@ async def start_session(
         glb = await _active_global(session)
         if glb is None:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="cannot start a local session without an active global session",
             )
         parent_id = uuid.UUID(str(glb.session_id))

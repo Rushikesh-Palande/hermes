@@ -307,7 +307,7 @@ def _validate_or_422(type_name: TypeName, payload: dict[str, Any]) -> BaseModel:
         return pyd_cls.model_validate(payload)
     except ValidationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=exc.errors(include_url=False, include_context=False),
         ) from exc
 

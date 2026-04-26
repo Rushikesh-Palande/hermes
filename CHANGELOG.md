@@ -8,6 +8,21 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.32] — 2026-04-26
+
+### Test suite + deprecation fixes
+
+- **330 tests pass (197 unit, 133 integration, 3 golden)** — first full
+  local run against a real TimescaleDB instance, covering auth, config,
+  devices, events, export, migrations, Modbus, MQTT brokers, offsets,
+  packages, sessions, system tunables.
+- **Fix starlette `HTTP_422_UNPROCESSABLE_ENTITY` deprecation warnings.**
+  Starlette 0.46+ renamed the constant to `HTTP_422_UNPROCESSABLE_CONTENT`.
+  Updated three route files (`config.py`, `offsets.py`, `sessions.py`) so
+  test runs are warning-free.
+- **mypy strict — no issues** across all 57 source files.
+- **ruff — all checks pass**, 111 files already formatted.
+
 ## [0.1.0-alpha.31] — 2026-04-26
 
 ### Release-workflow hotfix

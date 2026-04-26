@@ -181,12 +181,12 @@ async def replace_offsets(
             sid = int(raw_key)
         except ValueError as exc:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"sensor_id keys must be integers, got {raw_key!r}",
             ) from exc
         if sid < 1 or sid > NUM_SENSORS:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"sensor_id {sid} outside 1..{NUM_SENSORS}",
             )
         parsed[sid] = float(raw_val)

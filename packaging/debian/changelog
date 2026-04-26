@@ -1,4 +1,4 @@
-hermes (0.1.0~alpha.31-1) unstable; urgency=medium
+hermes (0.1.0~alpha.32-1) unstable; urgency=medium
 
   * .deb packaging scaffolding (control, rules, postinst, postrm,
     copyright, install). On install, runs packaging/install.sh
