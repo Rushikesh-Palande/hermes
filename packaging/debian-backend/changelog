@@ -1,4 +1,4 @@
-hermes-backend (0.1.0~alpha.30-1) unstable; urgency=medium
+hermes-backend (0.1.0~alpha.31-1) unstable; urgency=medium
 
   * Backend-only .deb package (hermes-backend). Ships the Python API +
     ingest services without the SvelteKit UI. For custom-frontend and

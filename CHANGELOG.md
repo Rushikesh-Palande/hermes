@@ -8,6 +8,21 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.31] — 2026-04-26
+
+### Release-workflow hotfix
+
+- **Fix `Create GitHub Release` failing to download artifacts.** The
+  `Download all artifacts` step used no `name:` filter, so
+  `actions/download-artifact@v4` attempted to fetch every artifact in
+  the run — including the Docker buildx GHA cache entry
+  (`*~KLR09D.dockerbuild`), which is stored separately from regular
+  artifacts and consistently fails after 5 retries. Replaced the
+  single unfiltered download step with three explicit named downloads
+  (`deb`, `deb-backend`, `offline-amd64`).
+
+No app code changes.
+
 ## [0.1.0-alpha.30] — 2026-04-26
 
 ### Backend-only .deb + customer integration guide

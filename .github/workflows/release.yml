@@ -344,10 +344,21 @@ jobs:
         with:
           fetch-depth: 0   # release-notes.sh needs git tag history
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      # Download each artifact by name to avoid picking up the Docker
+      # buildx GHA cache entry, which is stored separately and causes
+      # download-artifact to fail when downloaded without a name filter.
+      - uses: actions/download-artifact@v4
         with:
-          path: dist
+          name: deb
+          path: dist/deb
+      - uses: actions/download-artifact@v4
+        with:
+          name: deb-backend
+          path: dist/deb-backend
+      - uses: actions/download-artifact@v4
+        with:
+          name: offline-amd64
+          path: dist/offline-amd64
 
       - name: Flatten artifact dirs + compute SHA256SUMS
         run: |
