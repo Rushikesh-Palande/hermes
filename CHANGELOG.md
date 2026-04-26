@@ -8,6 +8,19 @@ Pre-release suffixes (`-alpha.N`, `-beta.N`, `-rc.N`) are used until v1.0.0.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.29] — 2026-04-26
+
+### Release-workflow hotfix (round 3)
+
+- **Remove obsolete `override_dh_systemd_enable` / `override_dh_systemd_start`
+  targets from `debian/rules`.** debhelper compat 13 removed both commands
+  (folded into `dh_installsystemd`). Having no-op overrides for them now
+  causes `dh` to abort with "Aborting due to left over override/hook targets
+  for now removed commands." Removed the two targets; since we have no
+  `debian/*.service` files `dh_installsystemd` is already a no-op.
+
+No app code changes.
+
 ## [0.1.0-alpha.28] — 2026-04-26
 
 ### Release-workflow hotfix (round 2)

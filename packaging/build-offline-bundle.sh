@@ -112,15 +112,22 @@ install -d "${BUNDLE}/packaging/wheelhouse"
 (
     cd "${REPO_ROOT}"
     # Export pinned deps from uv.lock (no dev extras) as a requirements
-    # file, then download pre-built binary wheels for all of them.
-    # `uv pip download` prefers binary wheels; falls back to sdist only
-    # when no wheel exists on PyPI (unlikely for our deps).
-    uv export --no-dev --format requirements-txt > "${STAGE}/requirements.txt"
-    uv pip download \
+    # file, then use pip to download pre-built binary wheels.
+    # `uv pip` has no `download` or `wheel` subcommands (uv 0.5+), so we
+    # seed a temporary venv to get a working pip binary.
+    # The `-e .` editable-install line that uv export emits for the project
+    # itself is stripped before passing to `pip download`, because pip
+    # cannot hash local directories. The project wheel is built separately
+    # by `uv build --wheel` below.
+    uv export --no-dev --format requirements-txt \
+        | grep -v '^-e ' \
+        > "${STAGE}/requirements.txt"
+    uv venv --python 3.11 --seed "${STAGE}/pip-env"
+    "${STAGE}/pip-env/bin/pip" download \
         --dest "${BUNDLE}/packaging/wheelhouse" \
         -r "${STAGE}/requirements.txt"
-    # Build the project itself as a wheel so install.sh can
-    # `pip install hermes-*.whl` offline without the full source tree.
+    # Build the project itself as a wheel so install.sh can do
+    # `pip install hermes-*.whl` from the wheelhouse without the source.
     uv build \
         --wheel \
         --out-dir "${BUNDLE}/packaging/wheelhouse"
