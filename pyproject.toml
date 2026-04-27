@@ -10,7 +10,7 @@ authors = [{ name = "EmbedSquare" }]
 dependencies = [
   # Web framework
   "fastapi>=0.115",
-  "uvicorn[standard]>=0.32",
+  "uvicorn[standard]>=0.46.0",
   "python-multipart>=0.0.17",
   "pydantic[email]>=2.9",
   "pydantic-settings>=2.6",
