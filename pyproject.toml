@@ -31,7 +31,7 @@ dependencies = [
   # ``protocol=modbus_tcp``. The ingest stack defaults to MQTT; pymodbus
   # is a runtime dep so the schema-level support already in alpha.5
   # can actually do something. See services/hermes/ingest/modbus.py.
-  "pymodbus>=3.7",
+  "pymodbus>=3.13.0",
   # JSON — orjson is the production JSON path (3-5x faster than stdlib
   # json on the 2 000 msg/s ingest hot path). Stdlib json is still used
   # in non-hot-path code where the speed doesn't matter (e.g. test
