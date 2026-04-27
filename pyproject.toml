@@ -24,7 +24,7 @@ dependencies = [
   # Symmetric at-rest encryption (Fernet) for stored secrets like the
   # MQTT broker password. Key is derived from HERMES_JWT_SECRET with a
   # domain separator — see services/hermes/auth/secret_box.py.
-  "cryptography>=43.0",
+  "cryptography>=47.0.0",
   # MQTT
   "paho-mqtt>=2.1",
   # Modbus TCP — used only when an operator configures a device with
